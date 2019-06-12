@@ -1,0 +1,1372 @@
+using OpenNLP.Tools.Chunker;
+using OpenNLP.Tools.Lang.English;
+using OpenNLP.Tools.NameFind;
+using OpenNLP.Tools.Parser;
+using OpenNLP.Tools.PosTagger;
+using OpenNLP.Tools.SentenceDetect;
+using OpenNLP.Tools.Tokenize;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Web;
+using System.Web.UI;
+using System.Web.UI.WebControls;
+using TextToVisuals.Tools;
+using System.Data.OleDb;
+using System.Data;
+using System.Text.RegularExpressions;
+using System.Data.SqlClient;
+using System.Drawing;
+
+namespace TextToVisuals
+{
+    public partial class TextToData : Page
+    {
+        private MaximumEntropySentenceDetector _sentenceDetector;
+        private AbstractTokenizer _tokenizer;
+        private EnglishMaximumEntropyPosTagger _posTagger;
+        private EnglishTreebankChunker _chunker;
+
+        List<string> strSelectFieldList ;
+        List<string> strTopList ;
+        List<string> strBottomList ;
+        
+        List<string> strWhereList ;
+
+        List<string> strANDList ;
+        List<string> strORList ;
+        List<string> strGroupByList ;
+
+        List<string> strHavingList ;
+        List<string> strOrderByList ;
+
+        protected void Page_Load(object sender, EventArgs e)
+        {
+
+        }
+        protected void Yes_Click(object sender, EventArgs e)
+        {
+            if(!string.IsNullOrEmpty( QuestionIdHiddenField.Value))
+            {
+                var dbSQLConnect = new DBSQLConnect();
+
+                if (!dbSQLConnect.OpenConnection()) return;
+
+                #region Sql Query
+
+                var sql = "Update  dbo.[Table] SET CorrectFlag =  1 " ;
+                sql += " Where ID=" + QuestionIdHiddenField.Value;
+
+                #endregion
+
+                var cmd = new SqlCommand(sql, dbSQLConnect.GetConnection());
+                var affectedRow = cmd.ExecuteNonQuery();
+                dbSQLConnect.CloseConnection();
+
+                YesButton.Enabled = false;
+            }
+        }
+        protected void No_Click(object sender, EventArgs e)
+        {
+            if (!string.IsNullOrEmpty(QuestionIdHiddenField.Value))
+            {
+                var dbSQLConnect = new DBSQLConnect();
+
+                if (!dbSQLConnect.OpenConnection()) return;
+
+                #region Sql Query
+
+                var sql = "Update  dbo.[Table] SET CorrectFlag =  0 ";
+                sql += " Where ID=" + QuestionIdHiddenField.Value;
+
+                #endregion
+
+                var cmd = new SqlCommand(sql, dbSQLConnect.GetConnection());
+                var affectedRow = cmd.ExecuteNonQuery();
+                dbSQLConnect.CloseConnection();
+
+                NoButton.Enabled = false;
+            }
+        }
+
+        protected void SubmitButton_Click(object sender, EventArgs e)
+        {
+            MessageLabel.Text = string.Empty;
+            InfoLabel.Text = string.Empty;
+            QueryGridView.Visible = false;
+            UserAnswerLabel.Visible = false;
+            YesButton.Visible = false;
+            NoButton.Visible = false;
+            DivSql.Visible = false;
+
+            YesButton.Enabled = true;
+            NoButton.Enabled = true;
+
+            GraphDIV.Visible = false;
+
+            QuestionIdHiddenField.Value = string.Empty;
+
+            if(string.IsNullOrEmpty( QuestionTextBox.Text))
+            {
+                MessageLabel.Text = "Question is missing";
+                return;
+            }
+            var dbConnect = new DBConnect();
+            if (!dbConnect.OpenConnection()) return ;
+
+            var dbSQLConnect = new DBSQLConnect();
+
+            if (!dbSQLConnect.OpenConnection())
+            {
+                InfoLabel.Text = "Ooops! there is issue with database connection.";
+                SQLQueryLabel.Text = string.Empty;
+                return;
+            }
+
+            strSelectFieldList = new List<string> ();
+            strTopList = new List<string>();
+            strBottomList = new List<string>();
+            strWhereList = new List<string>();
+            strANDList = new List<string>();
+            strORList = new List<string>();
+            strGroupByList = new List<string>();
+            strHavingList = new List<string>();
+            strOrderByList = new List<string>();
+
+            InsertUpdateSearchQuestion(dbSQLConnect, QuestionTextBox.Text, string.Empty, string.Empty);
+
+
+            string question = ReplaceAtter(dbConnect, QuestionTextBox.Text);
+            question = question.Replace("saving", "savings");
+            question = question.Replace("savingss", "savings");
+            question = question.Replace("savings", "total savings");
+            question = question.Replace("total total", "total ");
+
+
+            question = ReplaceQuestionWithColumnDefinition(dbConnect, question);
+            question = ReplacedValueTimeGrain(dbConnect, question);
+            question = ReplacedValueWithCondition(dbConnect, question);
+                
+                
+            question = LoadCountInfo(dbConnect, question);
+            question = LoadSumInfo(dbConnect, question);
+            question = LoadMaxInfo(dbConnect, question);
+            question = LoadMinInfo(dbConnect, question);
+            question = LoadAvgInfo(dbConnect, question);
+            question = LoadTopInfo(dbConnect, question);
+            question = LoadGroupByInfo(dbConnect, question);
+
+                
+            var strSQL = GetFinalSQLString(dbConnect);
+
+            SQLQueryLabel.Text = strSQL;
+
+            var cmd = new SqlCommand(strSQL);
+            cmd.Connection = dbSQLConnect.GetConnection();
+            var sda = new SqlDataAdapter();
+            sda.SelectCommand = cmd;
+            using (DataTable dt = new DataTable())
+            {
+                try
+                {
+                    sda.Fill(dt);
+                    QueryGridView.DataSource = dt;
+                    QueryGridView.DataBind();
+                    QueryGridView.Visible = true;
+                    UserAnswerLabel.Visible = true;
+                    YesButton.Visible = true;
+                    NoButton.Visible = true;
+                    DivSql.Visible = true;
+                    GraphDIV.Visible = true;
+                    InsertUpdateSearchQuestion(dbSQLConnect, QuestionTextBox.Text, strSQL, string.Empty);
+
+                    LoadPlotLyGraph(dt,strSQL);
+                    
+                }
+                catch(Exception ex)
+                {
+                    InfoLabel.Text = "Ooops! did not understand your ask. Give me few days to understand this pattern.";
+                    SQLQueryLabel.Text = string.Empty;
+                    
+                }
+            }
+            dbConnect.CloseConnection();
+        }
+        protected void InsertUpdateSearchQuestion(DBSQLConnect dbSQLConnect,string question,string sqlQuery,string correctFlag)
+        {
+            if(string.IsNullOrEmpty( QuestionIdHiddenField.Value))
+            {
+                var dt = DateTime.Now;
+                #region Sql Query
+                
+                var sql = "Insert Into dbo.[Table](Question,SearchDateTime,SQLString,CorrectFlag) values ";
+                sql += "('" + TextToVisualsStringHandler.ConvertStringToHtml(question);
+                sql+="','" + dt + "'," + (string.IsNullOrEmpty(sqlQuery) ? "NULL" : "'" + TextToVisualsStringHandler.ConvertStringToHtml(sqlQuery) +"'") +"," ;
+                sql+=  (string.IsNullOrEmpty(correctFlag)?"NULL":correctFlag)+ ")";
+
+                #endregion
+
+                var cmd = new SqlCommand(sql, dbSQLConnect.GetConnection());
+                var affectedRow = cmd.ExecuteNonQuery();
+                if (affectedRow >= 1)
+                {
+                    var ObjectId = GetObjectID(dbSQLConnect, question, dt);
+                    QuestionIdHiddenField.Value = ObjectId.ToString();
+                }
+            }
+            else
+            {
+                #region Sql Query
+
+                var sql = "Update  dbo.[Table] SET CorrectFlag =  " + (string.IsNullOrEmpty(correctFlag)?"NULL":correctFlag) +", SQLString=";
+                sql += (string.IsNullOrEmpty(sqlQuery) ? "NULL" : "'" + TextToVisualsStringHandler.ConvertStringToHtml(sqlQuery)+"'") ;
+                sql += " Where ID=" + QuestionIdHiddenField.Value;
+                
+                #endregion
+
+                var cmd = new SqlCommand(sql, dbSQLConnect.GetConnection());
+                var affectedRow = cmd.ExecuteNonQuery();
+                
+            }
+        }
+        protected int GetObjectID(DBSQLConnect dbSQLConnect, string question, DateTime dt)
+        {
+            int id = 0;
+
+            var sql = " Select Max(ID) from dbo.[Table]  ";
+            sql += " Where question='" + TextToVisualsStringHandler.ConvertStringToHtml(question)+"' AND SearchDateTime='" + dt +"'";
+            
+            var cmd = new SqlCommand(sql, dbSQLConnect.GetConnection());
+            var dr = cmd.ExecuteReader();
+
+            if (dr.Read())
+            {
+                id = string.IsNullOrEmpty(dr[0].ToString()) ? 900001 : int.Parse(dr[0].ToString());
+            }
+            else
+            {
+                id = 900001;
+            }
+            dr.Close();
+            return id;
+
+        }
+        protected void LoadPlotLyGraph(DataTable dt,string strSQL)
+        {
+            if (dt.Rows.Count > 100)
+            {
+
+                MyDivLiteral.Text = "";
+                return;
+            }
+
+            strSQL = strSQL.Substring(6, strSQL.Length-6);
+            strSQL = strSQL.Substring(0,strSQL.IndexOf("FROM dbo.RawData")-1);
+            
+            string[] str = Regex.Split(strSQL, ",");
+            var categoryList = new List<string>();
+            var meassureList = new List<string>();
+            foreach(var tmp in str)
+            {   
+                if (tmp.ToLower().Contains("sum(") ||
+                    tmp.ToLower().Contains("max(") ||
+                    tmp.ToLower().Contains("min(") ||
+                    tmp.ToLower().Contains("avg(") ||
+                    tmp.ToLower().Contains("count("))
+                {
+                    meassureList.Add(tmp);
+                }
+                else
+                {
+                    categoryList.Add(tmp);
+                }
+            }
+
+            if (categoryList.Count.Equals(1) && dt.Rows.Count<10 && !strTopList.Any())
+            {                
+                MyDivLiteral.Text= PreparePieGraph(dt,categoryList,meassureList);
+            }
+            else if (categoryList.Count.Equals(1) && dt.Rows.Count<50 && meassureList.Count<=2 )
+            {
+                MyDivLiteral.Text = PrepareBarGraph(dt, categoryList, meassureList);
+            }
+            else
+            {
+                GraphDIV.Visible = false;
+            }
+            
+        }
+        private string PrepareBarGraph(DataTable dt, List<string> categoryList,List<string> meassureList)
+        {
+            string divgrpahStr = string.Empty;
+            int iCounter = 1;
+            foreach (string item in meassureList)
+            {
+                divgrpahStr += "var trace" + iCounter;
+                var xValue = string.Empty;
+                var yValue = string.Empty;
+                foreach (DataRow r in dt.Rows)
+                {
+                    xValue += string.IsNullOrEmpty(xValue) ? "'" + r[0] + "'" : ",'" + r[0] + "'";
+                    yValue += string.IsNullOrEmpty(yValue) ? r[categoryList.Count + iCounter - 1] : "," + r[categoryList.Count + iCounter - 1];
+                }
+                divgrpahStr += " = {x:[" + xValue + "],y:[" + yValue + "],name:'" + dt.Columns[categoryList.Count + iCounter - 1].Caption + "',type:'bar'}; ";
+                iCounter++;
+            }
+            divgrpahStr += " var data = [";
+            for (int i = 1; i < iCounter; i++)
+            {
+                divgrpahStr += " trace" + i + " ,";
+            }
+            divgrpahStr = divgrpahStr.Substring(0, divgrpahStr.Length - 1) + "];";
+            divgrpahStr += " var layout = {barmode: 'group'}; ";
+            divgrpahStr += " Plotly.newPlot('myDiv', data, layout, {}, { showSendToCloud: true }); ";
+            divgrpahStr = "<script>" + divgrpahStr + "</script>";
+            return divgrpahStr;
+        }
+        private string PreparePieGraph(DataTable dt, List<string> categoryList, List<string> meassureList)
+        {
+            string divgrpahStr = string.Empty;
+            divgrpahStr += " var data = [";
+            int iCounter = 1;
+            foreach (string item in meassureList)
+            {
+                if(iCounter>1)
+                {
+                    divgrpahStr += ",";
+                }
+                var values = string.Empty ;
+                var labels = string.Empty;
+                foreach (DataRow r in dt.Rows)
+                {
+                    labels+= string.IsNullOrEmpty(labels) ? "'" + r[0] + "'" : ",'" + r[0] + "'";
+                    values += string.IsNullOrEmpty(values) ? r[categoryList.Count + iCounter - 1] : "," + r[categoryList.Count + iCounter - 1];
+                }
+                divgrpahStr += "{values: [" + values + "],labels: [" + labels + "],";
+                divgrpahStr += "domain: {column: "+ (iCounter-1).ToString() +"},";
+
+                divgrpahStr += " name:'" + dt.Columns[categoryList.Count + iCounter - 1].Caption + "',hoverinfo: 'label+percent+name',";
+                divgrpahStr += "  hole: .4,type: 'pie'}";
+                iCounter++;
+            }
+            divgrpahStr += "  ];";
+
+
+            divgrpahStr += " var layout = {title: 'Graph',  grid: {rows: 1, columns: " + (iCounter - 1).ToString() + "},  showlegend: true, ";
+            divgrpahStr += "   annotations: [{font: {size: 14},";
+            divgrpahStr += " showarrow: false,text: '',x: 0.17,y: 0.5},";
+            divgrpahStr += " {font: {size: 14},";
+            divgrpahStr += " showarrow: false,text: '',x: 0.82,y: 0.5 }]};";
+            divgrpahStr += " Plotly.newPlot('myDiv', data, layout,{showSendToCloud:true});";
+            divgrpahStr = " <script> " + divgrpahStr + " </script>";
+            
+            return divgrpahStr;
+        }
+        protected string GetFinalSQLString(DBConnect dbConnect)
+        {
+            var groupSTList = new List<string>();
+            string selectSt = string.Empty;
+            
+            foreach (string str in strGroupByList)
+            {
+                string tmp = str;
+                tmp = tmp.Replace(",", string.Empty);
+                tmp = tmp.ToLower().Replace("|fld|", string.Empty);
+
+                groupSTList.Add( tmp);
+
+                selectSt = string.IsNullOrEmpty(selectSt) ? tmp : tmp + "," + selectSt;
+            }
+            var measureList = new List<string>();
+            foreach (string str in strSelectFieldList)
+            {
+                string tmp = str;
+                
+                tmp= tmp.Replace(",", string.Empty);
+                tmp = tmp.ToLower().Replace("|fld|", string.Empty);
+
+                if (tmp.ToLower().Contains("sum(") ||
+                    tmp.ToLower().Contains("max(") ||
+                    tmp.ToLower().Contains("min(") ||
+                    tmp.ToLower().Contains("avg(") ||
+                    tmp.ToLower().Contains("count("))
+                {
+                    if (!measureList.Contains(tmp))
+                    {
+                        if (tmp.Contains("*"))
+                        {
+                            selectSt = string.IsNullOrEmpty(selectSt) ? tmp + " AS Total" : selectSt + "," + tmp+ " AS Total";
+                        }
+                        else
+                        {
+                            var asvalue = tmp.Substring(tmp.IndexOf("(")+1,tmp.Length-tmp.IndexOf("(")-2);
+                            asvalue = asvalue.ToLower().Replace("distinct", string.Empty);
+ 
+
+                            selectSt = string.IsNullOrEmpty(selectSt) ? tmp + " AS "+asvalue +"_Total" : selectSt + "," + tmp + " AS  "+asvalue +"_Total";
+                        }
+
+                        measureList.Add(tmp);
+                    }
+                }
+                else if(!groupSTList.Contains(tmp))
+                {
+                    selectSt = string.IsNullOrEmpty(selectSt) ? tmp : tmp + ","+selectSt;
+                    groupSTList.Add(tmp);
+                }
+            }
+
+            var condList = string.Empty;
+            foreach (string str in strWhereList)
+            {
+                string tmp = str;
+                condList += string.IsNullOrEmpty(condList) ? string.Empty : " AND ";
+                tmp = tmp.Replace(",", string.Empty);
+                tmp = tmp.ToLower().Replace("|fld|", string.Empty);
+                tmp = tmp.ToLower().Replace("|val|", "'");
+
+                if (!condList.Contains(tmp))
+                {
+                    condList += tmp;
+                }
+            }
+
+            var sql = "SELECT ";
+            if(strTopList.Any())
+            {
+                sql += " TOP " + strTopList.First() + " ";
+            }
+            sql+=selectSt + " FROM dbo.RawData ";
+
+            if (!string.IsNullOrEmpty(condList))
+            {
+                sql += " WHERE " + condList;
+            }
+
+            var groupst = string.Empty;
+            if (groupSTList.Any())
+            {
+                sql += " Group BY  " ;
+                foreach(var s in groupSTList)
+                {
+                    groupst += string.IsNullOrEmpty(groupst) ? string.Empty : ",";
+                    groupst += s;
+                    
+                }
+                
+                sql += groupst;
+            }
+            var orderby = string.Empty;
+            if (strTopList.Any() && measureList.Any())
+            {
+                sql += " ORDER BY  ";
+                
+                foreach (var s in measureList)
+                {
+                    orderby += string.IsNullOrEmpty(orderby) ? string.Empty : ",";
+                    orderby += s + " DESC ";
+
+                }
+                sql += orderby;
+            }
+            return sql;
+        }
+        protected void QueryGridView_RowDataBound(object sender, GridViewRowEventArgs e)
+        {
+            if (e.Row.RowType == DataControlRowType.DataRow)
+            {
+
+                for (int i = 0; i < QueryGridView.HeaderRow.Cells.Count; i++)
+                {
+                    string colHeader = QueryGridView.HeaderRow.Cells[i].Text;
+                    QueryGridView.HeaderRow.Cells[i].Text = colHeader.Replace("_", " ").ToUpper();
+                    if (colHeader.ToLower().Contains("total"))
+                    {
+                        double value = double.Parse(e.Row.Cells[i].Text);
+                        if (colHeader.ToLower().Contains("saving"))
+                        {
+                            e.Row.Cells[i].Text = String.Format("{0:0,0.00}", value);
+                        }
+                        else
+                        {
+                            e.Row.Cells[i].Text = String.Format("{0:0,0}", value);
+                        }                            
+                    }
+                }
+            }
+        }   
+        protected string LoadCountInfo(DBConnect dbConnect,string question)
+        {
+            var query = " Select SQLFunctionOrClause "; 
+            query += " From SQLWordMapping ";
+
+
+            string[] sentences = TokenizeSentence(question);
+            string[] strChunkList = Regex.Split(GetChunkTagTokensString(question), "<br/>");
+
+            for (int chunkCounter = 0; chunkCounter <= strChunkList.Count() - 1; chunkCounter++)
+            {
+                var strline = strChunkList[chunkCounter].Replace("]", string.Empty);
+                strline = RemoveTokens(strline);
+                strline = RemoveChunks(strline);
+                string[] strTokenList = Regex.Split(strline, " ");
+                for (int i = 0; i <= strTokenList.Count() - 1; i++)
+                {
+                    if (!string.IsNullOrEmpty(strTokenList[i].Replace(" ", string.Empty)))
+                    {
+                        var finalSQL = query + " Where Word='" + strTokenList[i].Replace(" ", string.Empty) + "' AND SQLFunctionOrClause='COUNT'";
+                        var cmd = new OleDbCommand(finalSQL, dbConnect.GetConnection());
+                        var dr = cmd.ExecuteReader();
+                        if (dr.Read())
+                        {
+
+                            var tmpStr = GetStringBasisToken(strChunkList[chunkCounter], "/NNS");
+                            tmpStr += GetStringBasisToken(strChunkList[chunkCounter], "/NN");
+                            if (string.IsNullOrEmpty(tmpStr))
+                            {
+                                if (chunkCounter < strChunkList.Count() - 1)
+                                {
+                                    tmpStr = GetStringBasisToken(strChunkList[chunkCounter + 1], "/NNS");
+                                    tmpStr += GetStringBasisToken(strChunkList[chunkCounter + 1], "/NN");
+                                }
+                            }
+                            if (tmpStr.ToLower().Contains("|fld|"))
+                            {
+                                tmpStr = tmpStr.Replace(strTokenList[i], string.Empty);
+                                tmpStr = tmpStr.Replace( ",",string.Empty);
+                                
+                                question = question.Replace(strTokenList[i],string.Empty);
+                                question =question.Replace(tmpStr, string.Empty);
+                                strSelectFieldList.Add("Count( DISTINCT  " + tmpStr + "),"); 
+                            }
+                            else
+                            {
+                                strSelectFieldList.Add("Count(*),");
+                            }
+
+                        }
+                        dr.Close();
+                    }
+                }                
+            }
+
+            return question;
+        }
+        protected string LoadTopInfo(DBConnect dbConnect, string question)
+        {
+            var query = " Select SQLFunctionOrClause ";
+            query += " From SQLWordMapping ";
+
+
+            string[] sentences = TokenizeSentence(question);
+            string[] strChunkList = Regex.Split(GetChunkTagTokensString(question), "<br/>");
+
+            for (int chunkCounter = 0; chunkCounter <= strChunkList.Count() - 1; chunkCounter++)
+            {
+                var strline = strChunkList[chunkCounter].Replace("]", string.Empty);
+                strline = RemoveTokens(strline);
+                strline = RemoveChunks(strline);
+                string[] strTokenList = Regex.Split(strline, " ");
+                for (int i = 0; i <= strTokenList.Count() - 1; i++)
+                {
+                    if (!string.IsNullOrEmpty(strTokenList[i].Replace(" ", string.Empty)))
+                    {
+                        var finalSQL = query + " Where Word='" + strTokenList[i].Replace(" ", string.Empty) + "' AND SQLFunctionOrClause='TOP'";
+                        var cmd = new OleDbCommand(finalSQL, dbConnect.GetConnection());
+                        var dr = cmd.ExecuteReader();
+                        if (dr.Read())
+                        {
+                            var reg = new Regex(@"\d+");
+                            var match = reg.Match(strline);
+                            if (match.Success)
+                            {
+                                strTopList.Add(match.Value);
+
+
+                                var strline1 = strline.Replace("]", string.Empty);
+                                strline1 = RemoveTokens(strline1);
+                                strline1 = RemoveChunks(strline1);
+                                string[] strTokenList1 = Regex.Split(strline1, " ");
+                                foreach (string s in strTokenList1)
+                                {
+                                    if (s.ToLower().Contains("|fld|"))
+                                    {
+                                        strSelectFieldList.Add(s + ",");
+                                        question = question.Replace(s, string.Empty);
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                if (chunkCounter < strChunkList.Count() - 1)
+                                {
+                                    var strline1 = strChunkList[chunkCounter + 1].Replace("]", string.Empty);
+                                    strline1 = RemoveTokens(strline1);
+                                    strline1 = RemoveChunks(strline1);
+
+                                    var reg1 = new Regex(@"\d+");
+                                    var match1 = reg.Match(strline1);
+                                    if (match1.Success)
+                                    {
+                                        strTopList.Add(match1.Value);
+                                    }
+                                }
+                            }
+                        }
+                        dr.Close();
+                    }
+                }
+            }
+
+            return question;
+        }
+        
+        protected string LoadSumInfo(DBConnect dbConnect, string question)
+        {
+            var query = " Select SQLFunctionOrClause ";
+            query += " From SQLWordMapping ";
+
+
+            string[] sentences = TokenizeSentence(question);
+            string[] strChunkList = Regex.Split(GetChunkTagTokensString(question), "<br/>");
+
+            for (int chunkCounter = 0; chunkCounter <= strChunkList.Count() - 1; chunkCounter++)
+            {
+                var strline = strChunkList[chunkCounter].Replace("]", string.Empty);
+                strline = RemoveTokens(strline);
+                strline = RemoveChunks(strline);
+                string[] strTokenList = Regex.Split(strline, " ");
+                for (int i = 0; i <= strTokenList.Count() - 1; i++)
+                {
+                    if (!string.IsNullOrEmpty(strTokenList[i].Replace(" ", string.Empty)))
+                    {
+                        var finalSQL = query + " Where Word='" + strTokenList[i].Replace(" ", string.Empty) + "' AND SQLFunctionOrClause='SUM'";
+                        var cmd = new OleDbCommand(finalSQL, dbConnect.GetConnection());
+                        var dr = cmd.ExecuteReader();
+                        if (dr.Read())
+                        {
+                            strSelectFieldList.Add("Sum(Savings),");
+                            question =question.ToLower().Replace("savings|fld|", string.Empty);
+                            
+                        }
+                        dr.Close();
+                    }
+                }
+            }
+
+            return question;
+        }
+        protected string LoadMaxInfo(DBConnect dbConnect, string question)
+        {
+            var query = " Select SQLFunctionOrClause ";
+            query += " From SQLWordMapping ";
+
+
+            string[] sentences = TokenizeSentence(question);
+            string[] strChunkList = Regex.Split(GetChunkTagTokensString(question), "<br/>");
+
+            for (int chunkCounter = 0; chunkCounter <= strChunkList.Count() - 1; chunkCounter++)
+            {
+                var strline = strChunkList[chunkCounter].Replace("]", string.Empty);
+                strline = RemoveTokens(strline);
+                strline = RemoveChunks(strline);
+                string[] strTokenList = Regex.Split(strline, " ");
+                for (int i = 0; i <= strTokenList.Count() - 1; i++)
+                {
+                    if (!string.IsNullOrEmpty(strTokenList[i].Replace(" ", string.Empty)))
+                    {
+                        var finalSQL = query + " Where Word='" + strTokenList[i].Replace(" ", string.Empty) + "' AND SQLFunctionOrClause='MAX'";
+                        var cmd = new OleDbCommand(finalSQL, dbConnect.GetConnection());
+                        var dr = cmd.ExecuteReader();
+                        if (dr.Read())
+                        {
+                            strSelectFieldList.Add("MAX(Savings),");
+
+                        }
+                        dr.Close();
+                    }
+                }
+            }
+
+            return question;
+        }
+        protected string LoadMinInfo(DBConnect dbConnect, string question)
+        {
+            var query = " Select SQLFunctionOrClause ";
+            query += " From SQLWordMapping ";
+
+
+            string[] sentences = TokenizeSentence(question);
+            string[] strChunkList = Regex.Split(GetChunkTagTokensString(question), "<br/>");
+
+            for (int chunkCounter = 0; chunkCounter <= strChunkList.Count() - 1; chunkCounter++)
+            {
+                var strline = strChunkList[chunkCounter].Replace("]", string.Empty);
+                strline = RemoveTokens(strline);
+                strline = RemoveChunks(strline);
+                string[] strTokenList = Regex.Split(strline, " ");
+                for (int i = 0; i <= strTokenList.Count() - 1; i++)
+                {
+                    if (!string.IsNullOrEmpty(strTokenList[i].Replace(" ", string.Empty)))
+                    {
+                        var finalSQL = query + " Where Word='" + strTokenList[i].Replace(" ", string.Empty) + "' AND SQLFunctionOrClause='MIN'";
+                        var cmd = new OleDbCommand(finalSQL, dbConnect.GetConnection());
+                        var dr = cmd.ExecuteReader();
+                        if (dr.Read())
+                        {
+                            strSelectFieldList.Add("MIN(Savings),");
+
+                        }
+                        dr.Close();
+                    }
+                }
+            }
+
+            return question;
+        }
+        protected string LoadAvgInfo(DBConnect dbConnect, string question)
+        {
+            var query = " Select SQLFunctionOrClause ";
+            query += " From SQLWordMapping ";
+
+
+            string[] sentences = TokenizeSentence(question);
+            string[] strChunkList = Regex.Split(GetChunkTagTokensString(question), "<br/>");
+
+            for (int chunkCounter = 0; chunkCounter <= strChunkList.Count() - 1; chunkCounter++)
+            {
+                var strline = strChunkList[chunkCounter].Replace("]", string.Empty);
+                strline = RemoveTokens(strline);
+                strline = RemoveChunks(strline);
+                string[] strTokenList = Regex.Split(strline, " ");
+                for (int i = 0; i <= strTokenList.Count() - 1; i++)
+                {
+                    if (!string.IsNullOrEmpty(strTokenList[i].Replace(" ", string.Empty)))
+                    {
+                        var finalSQL = query + " Where Word='" + strTokenList[i].Replace(" ", string.Empty) + "' AND SQLFunctionOrClause='AVG'";
+                        var cmd = new OleDbCommand(finalSQL, dbConnect.GetConnection());
+                        var dr = cmd.ExecuteReader();
+                        if (dr.Read())
+                        {
+                            strSelectFieldList.Add("AVG(Savings),");
+
+                        }
+                        dr.Close();
+                    }
+                }
+            }
+
+            return question;
+        }
+        protected string LoadGroupByInfo(DBConnect dbConnect, string question)
+        {
+            var query = " Select SQLFunctionOrClause ";
+            query += " From SQLWordMapping ";
+
+
+            string[] sentences = TokenizeSentence(question);
+            string[] strChunkList = Regex.Split(GetChunkTagTokensString(question), "<br/>");
+
+            for (int chunkCounter = 0; chunkCounter <= strChunkList.Count() - 1; chunkCounter++)
+            {
+                var strline = strChunkList[chunkCounter].Replace("]", string.Empty);
+                strline = RemoveTokens(strline);
+                strline = RemoveChunks(strline);
+                string[] strTokenList = Regex.Split(strline, " ");
+                for (int i = 0; i <= strTokenList.Count() - 1; i++)
+                {
+                    if (!string.IsNullOrEmpty(strTokenList[i].Replace(" ", string.Empty)))
+                    {
+                        var finalSQL = query + " Where Word='" + strTokenList[i].Replace(" ", string.Empty) + "' AND SQLFunctionOrClause='GROUP BY'";
+                        var cmd = new OleDbCommand(finalSQL, dbConnect.GetConnection());
+                        var dr = cmd.ExecuteReader();
+                        if (dr.Read())
+                        {
+                            var field = string.Empty;
+                            for(int j=i;j<=strChunkList.Count()-1;j++)
+                            {
+                                var strline1 = strChunkList[j].Replace("]", string.Empty);
+                                strline1 = RemoveTokens(strline1);
+                                strline1 = RemoveChunks(strline1);
+                                string[] strTokenList1 = Regex.Split(strline1, " ");
+                                foreach(string s in strTokenList1)
+                                {
+                                    if(s.ToLower().Contains("|fld|"))
+                                    {
+                                        strGroupByList.Add(s+",");
+                                        question = question.Replace(s,string.Empty);
+                                    }
+                                }
+
+                            }
+
+                        }
+                        dr.Close();
+                    }
+                }
+            }
+
+            return question;
+        }
+        protected string ReplacedValueTimeGrain(DBConnect dbConnect, string question)
+        {
+            if (question.ToLower().Contains("weekly")||
+                question.ToLower().Contains("week over week"))
+            {
+                question = question.ToLower().Replace("weekly", string.Empty);
+                question = question.ToLower().Replace("week over week", string.Empty);
+                strSelectFieldList.Add( "WeekDate|FLD|");
+            }
+            if (question.ToLower().Contains("monthly")||
+                question.ToLower().Contains("month over month"))
+            {
+                question = question.ToLower().Replace("monthly", string.Empty);
+                question = question.ToLower().Replace("month over month", string.Empty);
+                strSelectFieldList.Add( "MonthDate|FLD|");
+            }
+            if (question.ToLower().Contains("yearly")||
+                question.ToLower().Contains("year over year"))
+            {
+                question = question.ToLower().Replace("yearly", string.Empty);
+                question = question.ToLower().Replace("year over year", string.Empty);
+                strSelectFieldList.Add( "YearDate|FLD|");
+            }
+            if (question.ToLower().Contains("quarterly")||
+                question.ToLower().Contains("quarter over quarter"))
+            {
+                question = question.ToLower().Replace("quarterly", string.Empty);
+                question = question.ToLower().Replace("quarter over quarter", string.Empty);
+                strSelectFieldList.Add( "QuarterDate|FLD|");
+            }
+            if (question.ToLower().Contains("daily"))
+            {
+                question = question.ToLower().Replace("daily", string.Empty);
+                strSelectFieldList.Add( "date_of_service|FLD|");
+            }
+
+            if (question.ToLower().Contains("last year")||
+                question.ToLower().Contains("previous year")||
+                question.ToLower().Contains("prev year"))
+            {
+                question = question.ToLower().Replace("last year", string.Empty);
+                question = question.ToLower().Replace("previous year", string.Empty);
+                question = question.ToLower().Replace("prev year", string.Empty);
+                strWhereList.Add("Year(date_of_service|FLD|)=" + (DateTime.Today.Year-1).ToString());
+
+            }
+            if (question.ToLower().Contains("this year") ||
+                question.ToLower().Contains("current year")||
+                question.ToLower().Contains("curr year"))
+            {
+                question = question.ToLower().Replace("last year", string.Empty);
+                question = question.ToLower().Replace("current year", string.Empty);
+                question = question.ToLower().Replace("curr year", string.Empty);
+                strWhereList.Add("Year(date_of_service|FLD|)=" + DateTime.Today.Year.ToString());
+
+            }
+
+            return question;
+        }
+        protected string ReplacedValueWithCondition(DBConnect dbConnect, string question)
+        {
+            var query = " Select ColumnName,ColumnValue,FreeText "; 
+            query += " From TableColumnUniqueData ";
+            query += " Order by ColumnName ";
+
+            var cmd = new OleDbCommand(query, dbConnect.GetConnection());
+            cmd.CommandTimeout = TextToVisualsConstant.QueryCommandTimeout;
+            var dr = cmd.ExecuteReader();
+
+            while (dr.Read())
+            {
+                if (question.ToLower().Contains(dr["FreeText"].ToString().ToLower()))
+                {
+                    question = question.ToLower().Replace(dr["FreeText"].ToString().ToLower() + " " + dr["ColumnName"].ToString().ToLower()+"|fld|", string.Empty);
+                    question = question.ToLower().Replace(dr["FreeText"].ToString().ToLower() + dr["ColumnName"].ToString().ToLower() + "|fld|", string.Empty);
+                    question = question.ToLower().Replace(dr["FreeText"].ToString().ToLower() , string.Empty);
+
+                    strWhereList.Add (  dr["ColumnName"].ToString().ToLower() + "|FLD| = |VAL|" + dr["ColumnValue"].ToString().ToLower() +"|VAL|");
+                }
+            }
+            dr.Close();
+            return question;
+        }
+
+        protected string ReplaceQuestionWithColumnDefinition(DBConnect dbConnect, string question)
+        {
+            var query = " Select ColumnName,FreeText,Priority ";
+            query += " From ColumnDef ";
+            query += " Order by len(FreeText) desc,ColumnName,Priority";
+
+            var cmd = new OleDbCommand(query, dbConnect.GetConnection());
+            cmd.CommandTimeout = TextToVisualsConstant.QueryCommandTimeout;
+            var dr = cmd.ExecuteReader();
+
+            while (dr.Read())
+            {
+                if (question.ToLower().Contains(dr["FreeText"].ToString().ToLower()+"wise" )
+                    || question.ToLower().Contains(dr["FreeText"].ToString().ToLower()+" wise"))
+                {
+
+                    strSelectFieldList.Add(dr["ColumnName"].ToString().ToLower()+"|FLD|");
+                    strGroupByList.Add(dr["ColumnName"].ToString().ToLower() + "|FLD|");
+                    
+                    question = question.ToLower().Replace(dr["FreeText"].ToString().ToLower() + "wise", string.Empty);
+                    question = question.ToLower().Replace(dr["FreeText"].ToString().ToLower() + "wise", string.Empty);
+                }    
+                else if (question.ToLower().Contains(dr["FreeText"].ToString().ToLower()))
+                {
+                    question = question.ToLower().Replace(dr["FreeText"].ToString().ToLower(), dr["ColumnName"].ToString().ToLower() + "|FLD| ");
+                }
+            }
+            dr.Close();
+            return question;
+        }
+        protected string ReplaceAtter(DBConnect dbConnect, string question)
+        {
+            var query = " Select ReplaceText,FreeText,Priority ";
+            query += " From AtterInfo ";
+            query += " Order by len(FreeText) desc,ReplaceText,Priority";
+
+            var cmd = new OleDbCommand(query, dbConnect.GetConnection());
+            cmd.CommandTimeout = TextToVisualsConstant.QueryCommandTimeout;
+            var dr = cmd.ExecuteReader();
+
+            while (dr.Read())
+            {
+                if (question.ToLower().Contains(dr["FreeText"].ToString().ToLower()))
+                {
+                    question = question.ToLower().Replace(dr["FreeText"].ToString().ToLower(), dr["ReplaceText"].ToString().ToLower() );
+                }
+            }
+            dr.Close();
+            return question;
+        }
+        
+        protected string GetSQLQueryString(string chunk)
+        {
+            var dbConnect = new DBConnect();
+            if (!dbConnect.OpenConnection()) return string.Empty;
+
+            var strGeneratedQuery = string.Empty;
+            
+            strSelectFieldList = new List<string>();
+            strTopList = new List<string>();
+            strBottomList = new List<string>();
+            
+            strWhereList = new List<string>();
+
+            strANDList = new List<string>();
+            strORList = new List<string>();
+            strGroupByList = new List<string>();
+            
+            strHavingList = new List<string>();
+            strOrderByList = new List<string>();
+
+
+            var query = " Select SQLFunctionOrClause "; //,Sum(TotalRowsCount) TotalRowsCount 
+            query += " From SQLWordMapping ";
+
+            string[] strChunkList = Regex.Split( chunk,"<br/>");
+            for (int chunkCounter = 0; chunkCounter <= strChunkList.Count() - 1;chunkCounter++ )
+            {
+                var strline = strChunkList[chunkCounter].Replace("]", string.Empty);
+                strline = RemoveTokens(strline);
+                strline = RemoveChunks(strline);
+                string[] strTokenList = Regex.Split(strline, " ");
+                for (int i = 0; i <= strTokenList.Count() - 1; i++)
+                {
+                    if (!string.IsNullOrEmpty(strTokenList[i].Replace(" ", string.Empty)))
+                    {
+                        var finalSQL = query + " Where Word='" + strTokenList[i].Replace(" ", string.Empty) + "'";
+                        var cmd = new OleDbCommand(finalSQL, dbConnect.GetConnection());
+                        var dr = cmd.ExecuteReader();
+                        if (dr.Read())
+                        {
+                            if (dr["SQLFunctionOrClause"].ToString().ToLower().Equals("select") ||
+                                dr["SQLFunctionOrClause"].ToString().ToLower().Equals("count") ||
+                                dr["SQLFunctionOrClause"].ToString().ToLower().Equals("max") ||
+                                dr["SQLFunctionOrClause"].ToString().ToLower().Equals("min") ||
+                                dr["SQLFunctionOrClause"].ToString().ToLower().Equals("avg") ||
+                                dr["SQLFunctionOrClause"].ToString().ToLower().Equals("group by") ||
+                                dr["SQLFunctionOrClause"].ToString().ToLower().Equals("order by") ||
+                                dr["SQLFunctionOrClause"].ToString().ToLower().Equals("top") ||
+                                dr["SQLFunctionOrClause"].ToString().ToLower().Equals("bottom") ||
+                                dr["SQLFunctionOrClause"].ToString().ToLower().Equals("sum"))
+                            {
+                                strSelectFieldList.Add(dr["SQLFunctionOrClause"].ToString());
+                                strGeneratedQuery += dr["SQLFunctionOrClause"].ToString() + "<br/>";
+
+                                if (dr["SQLFunctionOrClause"].ToString().ToLower().Equals("top") ||
+                                        dr["SQLFunctionOrClause"].ToString().ToLower().Equals("bottom"))
+                                {
+                                    var reg = new Regex(@"\d+");
+                                    var match = reg.Match(strline);
+                                    if (match.Success)
+                                    {
+                                        strGeneratedQuery += match.Value + "<br/>";
+                                    }
+                                    else
+                                    {
+                                        if (chunkCounter < strChunkList.Count() - 1)
+                                        {
+                                            var strline1 = strChunkList[chunkCounter + 1].Replace("]", string.Empty);
+                                            strline1 = RemoveTokens(strline1);
+                                            strline1 = RemoveChunks(strline1);
+
+                                            var reg1 = new Regex(@"\d+");
+                                            var match1 = reg.Match(strline1);
+                                            if (match1.Success)
+                                            {
+                                                strGeneratedQuery += match1.Value + "<br/>";
+                                            }
+                                        }
+                                    }
+
+                                }
+                                var tmpStr = GetStringBasisToken(strChunkList[chunkCounter],"/NNS");
+                                tmpStr += GetStringBasisToken(strChunkList[chunkCounter],"/NN");
+                                if(string.IsNullOrEmpty(tmpStr))
+                                {
+                                    if (chunkCounter < strChunkList.Count() - 1)
+                                    {
+                                        tmpStr = GetStringBasisToken(strChunkList[chunkCounter+1], "/NNS");
+                                        tmpStr += GetStringBasisToken(strChunkList[chunkCounter+1], "/NN");                                
+                                    }
+                                }
+                                strSelectFieldList.Add(tmpStr);
+                                strGeneratedQuery+= tmpStr;
+                            }
+                            else
+                            {
+                                strGeneratedQuery += dr["SQLFunctionOrClause"].ToString() + "<br/>";
+                            }
+                        }
+                        dr.Close();
+                    }
+
+                }
+                string whereList = ReplacedValueWithCondition(dbConnect, strline);
+                strWhereList.Add(whereList);
+                strGeneratedQuery += whereList + "<br/>";
+                
+            }
+
+            return strGeneratedQuery;
+        }
+        protected string GetStringBasisToken(string line, string token)
+        {
+            string strList = string.Empty;
+            var tmplist = Regex.Split(line, " ");
+            foreach (string item in tmplist)
+            {
+                if (item.Contains(token ) || item.Contains(token + "]"))
+                {
+                    var tmpStr = item.Replace(token + " ", string.Empty);
+                    tmpStr = tmpStr.Replace(token + "]", string.Empty);
+                    tmpStr = tmpStr.Replace("[", string.Empty);
+                    tmpStr = tmpStr.Replace("]", string.Empty);
+                    tmpStr = tmpStr.Replace(token, string.Empty);
+                    strList += tmpStr + ",";
+
+                }
+            }
+            return strList;
+        }
+        protected string RemoveTokens(string tokenString)
+        {
+            tokenString = tokenString.Replace("/CC", string.Empty);
+            tokenString = tokenString.Replace("/CD", string.Empty);
+            tokenString = tokenString.Replace("/DT", string.Empty);
+            tokenString = tokenString.Replace("/EX", string.Empty);
+            tokenString = tokenString.Replace("/FW", string.Empty);
+            tokenString = tokenString.Replace("/IN", string.Empty);
+            tokenString = tokenString.Replace("/JJ", string.Empty);
+            tokenString = tokenString.Replace("/JJR", string.Empty);
+            tokenString = tokenString.Replace("/JJS", string.Empty);
+            tokenString = tokenString.Replace("/LS", string.Empty);
+            tokenString = tokenString.Replace("/MD", string.Empty);
+            tokenString = tokenString.Replace("/NNP", string.Empty);
+            tokenString = tokenString.Replace("/NNPS", string.Empty);
+            tokenString = tokenString.Replace("/NNS", string.Empty);
+            tokenString = tokenString.Replace("/NN", string.Empty);
+            
+            tokenString = tokenString.Replace("/PDT", string.Empty);
+            tokenString = tokenString.Replace("/POS", string.Empty);
+            tokenString = tokenString.Replace("/PRP", string.Empty);
+            tokenString = tokenString.Replace("/PRP$", string.Empty);
+            tokenString = tokenString.Replace("/RBR", string.Empty);
+            tokenString = tokenString.Replace("/RBS", string.Empty);
+            tokenString = tokenString.Replace("/RB", string.Empty);
+            
+            tokenString = tokenString.Replace("/RP", string.Empty);
+            tokenString = tokenString.Replace("/SYM", string.Empty);
+            tokenString = tokenString.Replace("/TO", string.Empty);
+            tokenString = tokenString.Replace("/UH", string.Empty);
+            tokenString = tokenString.Replace("/VBD", string.Empty);
+            tokenString = tokenString.Replace("/VBG", string.Empty);
+            tokenString = tokenString.Replace("/VBN", string.Empty);
+            tokenString = tokenString.Replace("/VBP", string.Empty);
+            tokenString = tokenString.Replace("/VBZ", string.Empty);
+            tokenString = tokenString.Replace("/VB", string.Empty);
+            
+            tokenString = tokenString.Replace("/WDT", string.Empty);
+            tokenString = tokenString.Replace("/WP", string.Empty);
+            tokenString = tokenString.Replace("/WP$", string.Empty);
+            tokenString = tokenString.Replace("/WRB", string.Empty);
+            tokenString = tokenString.Replace("/``", string.Empty);
+            tokenString = tokenString.Replace("/,", string.Empty);
+            tokenString = tokenString.Replace("/''", string.Empty);
+            tokenString = tokenString.Replace("/.", string.Empty);
+            tokenString = tokenString.Replace("/:", string.Empty);
+            tokenString = tokenString.Replace("/$", string.Empty);
+            tokenString = tokenString.Replace("/#", string.Empty);
+            tokenString = tokenString.Replace("/-LRB-", string.Empty);
+            tokenString = tokenString.Replace("/ -RRB- ", string.Empty);
+
+            return tokenString;
+        }
+        protected string RemoveChunks(string chunkString)
+        {
+            chunkString = chunkString.Replace("[ADJP", string.Empty);
+            chunkString = chunkString.Replace("[ADVP", string.Empty);
+            chunkString = chunkString.Replace("[CONJP", string.Empty);
+            chunkString = chunkString.Replace("[INTJ", string.Empty);
+            chunkString = chunkString.Replace("[LST", string.Empty);
+            chunkString = chunkString.Replace("[NP", string.Empty);
+
+            chunkString = chunkString.Replace("[PP", string.Empty);
+            chunkString = chunkString.Replace("[PRT", string.Empty);
+            chunkString = chunkString.Replace("[SBAR", string.Empty);
+            chunkString = chunkString.Replace("[Unlike", string.Empty);
+            chunkString = chunkString.Replace("[VP", string.Empty);
+
+            return chunkString;
+        }
+        protected string GetTokenizeString()
+        {
+            var output = new StringBuilder();
+
+            string[] sentences = SplitSentences(QuestionTextBox.Text);
+
+            foreach (string sentence in sentences)
+            {
+                string[] tokens = TokenizeSentence(sentence);
+                output.Append(string.Join("<br/>", tokens)).Append("\r\n\r\n");
+            }
+
+            return  output.ToString();
+        }
+        protected string GetPosTagTokensString()
+        {
+            var output = new StringBuilder();
+
+            string[] sentences = SplitSentences(QuestionTextBox.Text);
+
+            foreach (string sentence in sentences)
+            {
+                string[] tokens = TokenizeSentence(sentence);
+                string[] tags = PosTagTokens(tokens);
+
+                for (int currentTag = 0; currentTag < tags.Length; currentTag++)
+                {
+                    output.Append(tokens[currentTag]).Append("/").Append(tags[currentTag]).Append("<br/>");
+                    
+                }
+
+                output.Append("\r\n\r\n");
+            }
+            return output.ToString();
+        }
+        protected string GetChunkTagTokensString(string question)
+        {
+            var output = new StringBuilder();
+
+            string[] sentences = SplitSentences(question);
+
+            foreach (string sentence in sentences)
+            {
+                string[] tokens = TokenizeSentence(sentence);
+                string[] tags = PosTagTokens(tokens);
+
+                output.Append(ChunkSentence(tokens, tags)).Append("<br/>");
+            }
+
+            return output.ToString();
+        }
+        private string ChunkSentence(string[] tokens, string[] tags)
+        {
+            if (_chunker == null)
+            {
+                string filepath = HttpContext.Current.Server.MapPath("~/Models/OpenNLP/EnglishChunk.nbin");
+                
+                _chunker = new EnglishTreebankChunker(filepath);
+            }
+
+            return string.Join("<br/>", _chunker.GetChunks(tokens, tags));
+        }
+        private string[] SplitSentences(string paragraph)
+        {
+            if (_sentenceDetector == null)
+            {
+                string filepath = HttpContext.Current.Server.MapPath("~/Models/OpenNLP/EnglishSD.nbin");
+                _sentenceDetector = new EnglishMaximumEntropySentenceDetector(  filepath);
+            }
+
+            return _sentenceDetector.SentenceDetect(paragraph);
+        }
+        private string[] TokenizeSentence(string sentence)
+        {
+            if (_tokenizer == null)
+            {
+                _tokenizer = new EnglishRuleBasedTokenizer(false);
+            }
+
+            return _tokenizer.Tokenize(sentence);
+        }
+        private string[] PosTagTokens(string[] tokens)
+        {
+            if (_posTagger == null)
+            {
+                string fileEnglishPOSpath = HttpContext.Current.Server.MapPath("~/Models/OpenNLP/EnglishPOS.nbin");
+                string fileEnglishTagDictpath = HttpContext.Current.Server.MapPath("~/Models/OpenNLP/Parser/tagdict");
+                _posTagger = new EnglishMaximumEntropyPosTagger(fileEnglishPOSpath,fileEnglishTagDictpath);
+            }
+
+            return _posTagger.Tag(tokens);
+        }
+
+
+    }
+
+}
+
+
+
+CREATE TABLE [dbo].[Table] (
+    [Id]             INT            IDENTITY (1, 1) NOT NULL,
+    [Question]       NVARCHAR (MAX) NULL,
+    [SQLString]      NVARCHAR (MAX) NULL,
+    [ResultStatus]   INT            NULL,
+    [NTID]           NVARCHAR (10)  NULL,
+    [SearchDateTime] DATETIME       NULL,
+    [CorrectFlag]    INT            NULL,
+    [DOSYear]        NCHAR (10)     NULL,
+    PRIMARY KEY CLUSTERED ([Id] ASC)
+);
+Create Table ColumnDef(
+ColumnName
+FreeText
+ColumnCategory
+Priority);
+
+Create tabe SQLWordMapping(
+SQLFunctionOrClause
+Word
+DerivedThrough)
+
+Create Table TableColumnUniqueData(
+ColumnName
+ColumnValue
+FreeText)
+
+SQLFunctionOrClause	Word	DerivedThrough
+SUM	Sum	SQL
+SUM	total	SQL
+AVG	average	SQL
+AVG	avg	SQL
+AVG	mean	SQL
+MAX	maximum	SQL
+MAX	max	SQL
+MAX	largest	SQL
+MAX	highest	SQL
+MIN	minimum	SQL
+MIN	min	SQL
+MIN	lowest	SQL
+MIN	smallest	SQL
+Order By	Order by	SQL
+Order By	sorted by	SQL
+Order By	ordered by	SQL
+Order By	sort by	SQL
+ASC	Ascending	SQL
+Desc	descending	SQL
+ASC	asc	SQL
+Desc	desc	SQL
+ASC	increasing	SQL
+Desc	decreasing	SQL
+Desc	new first	SQL
+Desc	new last	SQL
+ASC	old first	SQL
+ASC	old last	SQL
+Group By	By	SQL
+Group By	group by	SQL
+Group By	Grouped by	SQL
+Group By	per	SQL
+Group By	by each	SQL
+Group By	for each	SQL
+Group By	foreach	SQL
+Group By	in each	SQL
+SELECT	Show	SQL
+SELECT	select	SQL
+SELECT	tell	SQL
+SELECT	search	SQL
+SELECT	find	SQL
+SELECT	look	SQL
+SELECT	list	SQL
+SELECT	display	SQL
+SELECT	get	SQL
+SELECT	retrieve	SQL
+Count	How many	SQL
+Count	number of	SQL
+Count	count	SQL
+Count	amount of	SQL
+Count	# of	SQL
+LIKE	like	SQL
+LIKE	likes	SQL
+LIKE	similar to	SQL
+BETWEEN	between	SQL
+BETWEEN	per	SQL
+BETWEEN	range	SQL
+COUNT	number	SQL
+DISTINCT	distinct	SQL
+DISTINCT	different	SQL
+DISTINCT	distinctive	SQL
+<	less	SQL
+<	less than	SQL
+>	greater	SQL
+>	over	SQL
+>	greater than	SQL
+DESC	inverse	SQL
+TOP	Top	SQL
+TOP	leading	SQL
+TOP	highest	SQL
+TOP	largest	SQL
+TOP	best	SQL
+TOP	most	SQL
+TOP	most popular	SQL
+BOTTOM	bottom	SQL
+BOTTOM	lowest	SQL
+BOTTOM	smallest	SQL
+BOTTOM	worst	SQL
+BOTTOM	least popular	SQL
+BOTTOM	least	SQL
+NOT LIKE	not Starting	SQL
+LIKE	Starting	SQL
+LIKE	containing	SQL
+LIKE	ending	SQL
+>	More than	SQL
+<=	at least	SQL
+>=	at most	SQL
+=	equal to	SQL
+!=	not equal to	SQL
+<	<	SQL
+<=	<=	SQL
+>	>	SQL
+>=	>=	SQL
+!=	!=	SQL
+COUNT	Many	SQL
+COUNT	Volume	DB
+Group By	Wise	SQL
+Group By	corresponding	SQL
+Group By	across	SQL
