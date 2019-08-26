@@ -1,0 +1,1376 @@
+Option Explicit
+Dim iItemIDClmNmbr As Integer
+Dim iItemNameClmNmbr As Integer
+Dim iComboNoClmNmbr As Integer
+Dim iManufacturerClmNmbr As Integer
+Dim iOfferPIDClmNmbr As Integer
+Dim iMultiplierClmNmbr As Integer
+Dim iCityClmNmbr As Integer
+Dim iStartDateClmNmbr As Integer
+Dim iEndDateClmNmbr As Integer
+Dim iTypeOfSupportClmNmbr As Integer
+Dim iTypeOfOfferClmNmbr As Integer
+Dim iValueOfSupportClmNmbr As Integer
+Dim iPricingTrackerClmNmbr As Integer
+Dim iCityValueClmNmbr As Integer
+Dim iSuggestedSFClmNmbr As Integer
+
+Dim conn As New ADODB.Connection
+        
+Private Const iDefaultColumnValue = 9999
+
+Sub Run()
+    
+    Dim wbSourceWorkbook As Workbook
+    Dim strSourceFileName As String
+    Dim iCounter As Integer
+    Dim strDBFileName As String
+    Dim strCon As String
+    Dim rs As Recordset
+    
+    Application.ScreenUpdating = False
+    
+    'Code to clear City Clm Mapping Value
+    Range(Range("Control_CityTab").Offset(1, 1), Range("Control_CityTab").Offset(100, 0).End(xlUp).Offset(0, 1)).ClearContents
+    
+    'Code to Clear existing Alert
+    Range(Range("Error_Sheet").Offset(1, 0), Range("Error_ErrorDescription").Offset(1000000)).ClearContents
+    
+    'Code to Clear Data Sheet
+    Range(Range("BFModification_ItemID").Offset(1, 0), Range("BFModification_BF").Offset(1000000)).ClearContents
+    Range(Range("SingleSKU_ItemID").Offset(1, 0), Range("SingleSKU_BF").Offset(1000000)).ClearContents
+    Range(Range("BMSM_ItemID").Offset(1, 0), Range("BMSM_OfferPID").Offset(1000000)).ClearContents
+    Range(Range("BXGY_ItemID").Offset(1, 0), Range("BXGY_OfferPID").Offset(1000000)).ClearContents
+    Range(Range("Combo2_ItemID1").Offset(1, 0), Range("Combo2_OfferPID").Offset(1000000)).ClearContents
+    Range(Range("Combo3_ItemID1").Offset(1, 0), Range("Combo3_OfferPID").Offset(1000000)).ClearContents
+    Range(Range("Combo5_ItemID1").Offset(1, 0), Range("Combo5_OfferPID").Offset(1000000)).ClearContents
+    Range(Range("FOC_ItemIDPurchase").Offset(1, 0), Range("FOC_OfferPID").Offset(1000000)).ClearContents
+    
+    'Clearing Header Row
+    Range("Control_HeaderRowNumber").Offset(1).ClearContents
+    
+    'Creating Database connection
+    strDBFileName = Range("Control_DBFileName").Offset(1, 0)
+
+    strCon = "Provider=Microsoft.ACE.OLEDB.12.0;" & _
+    "Data Source=" & ThisWorkbook.Path & "\" & strDBFileName & ";" & _
+    "Password=;"
+    
+    On Error Resume Next
+    conn.Open (strCon)
+    If Err.Description <> "" Then
+        Call GenerateErrorLog("Alert", "Error in DB Connection ", "")
+        MsgBox "Erorr in DB file Connection", vbOKOnly + vbCritical
+        wbSourceWorkbook.Close False
+        Exit Sub
+    End If
+    Err.Clear
+        
+    'Validating DB Version
+    Set rs = conn.Execute("Select KeyValue from DBInfo where Key='DBVersion'")
+    If rs.EOF = False Then
+        If rs.Fields(0).Value <> Range("Control_DBVersion").Offset(1).Value Then
+            Call GenerateErrorLog("Alert", "Database version is invalid ", "")
+            MsgBox "Database version is invalid.", vbOKOnly + vbCritical
+            conn.Close
+            Exit Sub
+        End If
+    Else
+        Call GenerateErrorLog("Alert", "Database version is invalid", "")
+        MsgBox "Database version is invalid", vbOKOnly + vbCritical
+        conn.Close
+        Exit Sub
+    End If
+    On Error GoTo 0
+    
+    'Code to Ask user to provide input file name
+    strSourceFileName = GetSourceFileName()
+    If strSourceFileName = "" Then
+        MsgBox "File was not selected", vbOKOnly + vbCritical, "Pricing Tracker Tool"
+        Application.ScreenUpdating = True
+        Exit Sub
+    End If
+    
+    Set wbSourceWorkbook = Workbooks.Open(strSourceFileName, False)
+    ThisWorkbook.Activate
+
+    'Deleting Raw Data
+    conn.Execute ("Delete from RawData")
+        
+    Application.StatusBar = "Preparing data "
+    
+    'Finding Item/PID Clm
+    iItemIDClmNmbr = GetColumNumbrOfRange(wbSourceWorkbook, "Control_ItemTab")
+    If iItemIDClmNmbr = iDefaultColumnValue Then
+        GenerateErrorLog "Alert", "Item ID/PID Column not found"
+    End If
+            
+    'Finding Item Name
+    iItemNameClmNmbr = GetColumNumbrOfRange(wbSourceWorkbook, "Control_ItemName")
+    If iItemNameClmNmbr = 0 Then
+        GenerateErrorLog "Alert", "Item Name Column not found "
+    End If
+    
+    'Finding Combo No
+    iComboNoClmNmbr = GetColumNumbrOfRange(wbSourceWorkbook, "Control_ComboNo")
+    If iComboNoClmNmbr = 0 Then
+        GenerateErrorLog "Alert", "Combo No Column not found "
+    End If
+    
+    'Finding Manufacturer
+    iManufacturerClmNmbr = GetColumNumbrOfRange(wbSourceWorkbook, "Control_Manufacturer")
+    If iManufacturerClmNmbr = 0 Then
+        GenerateErrorLog "Alert", "Manufacturer Column not found "
+    End If
+    
+    'Finding Offer PID
+    iOfferPIDClmNmbr = GetColumNumbrOfRange(wbSourceWorkbook, "Control_OfferPID")
+    If iOfferPIDClmNmbr = 0 Then
+        GenerateErrorLog "Alert", "Offer PID Column not found "
+    End If
+    
+    'Finding Multiplier
+    iMultiplierClmNmbr = GetColumNumbrOfRange(wbSourceWorkbook, "Control_Multiplier")
+    If iMultiplierClmNmbr = 0 Then
+        GenerateErrorLog "Alert", "Multiplier Column not found "
+    End If
+    
+    'Finding City
+    iCityClmNmbr = GetColumNumbrOfRange(wbSourceWorkbook, "Control_City")
+    If iCityClmNmbr = 0 Then
+        GenerateErrorLog "Alert", "City Column not found "
+    End If
+    
+    'Finding Start Date
+    iStartDateClmNmbr = GetColumNumbrOfRange(wbSourceWorkbook, "Control_StartDate")
+    If iStartDateClmNmbr = 0 Then
+        GenerateErrorLog "Alert", "Start Date Column not found "
+    End If
+    
+    'Finding End Date
+    iEndDateClmNmbr = GetColumNumbrOfRange(wbSourceWorkbook, "Control_EndDate")
+    If iEndDateClmNmbr = 0 Then
+        GenerateErrorLog "Alert", "End Date Column not found "
+    End If
+    
+    'Finding City Value
+    iCityValueClmNmbr = GetColumNumbrOfRange(wbSourceWorkbook, "Control_CityValue")
+    If iCityValueClmNmbr = 0 Then
+        GenerateErrorLog "Alert", "City Value Column not found "
+    End If
+    
+    'Finding Type of Support
+    iTypeOfSupportClmNmbr = GetColumNumbrOfRange(wbSourceWorkbook, "Control_TypeOfSupport")
+    If iTypeOfSupportClmNmbr = 0 Then
+        GenerateErrorLog "Alert", "Type of Support Column not found "
+    End If
+    
+    'Finding Type of Offer
+    iTypeOfOfferClmNmbr = GetColumNumbrOfRange(wbSourceWorkbook, "Control_TypeOfOffer")
+    If iTypeOfOfferClmNmbr = 0 Then
+        GenerateErrorLog "Alert", "Type of Offer Column not found "
+    End If
+    
+    'Finding Value of Support
+    iValueOfSupportClmNmbr = GetColumNumbrOfRange(wbSourceWorkbook, "Control_ValueOfSupport")
+    If iValueOfSupportClmNmbr = 0 Then
+        GenerateErrorLog "Alert", "Value of Support Column not found "
+    End If
+    
+    'Finding Pricing Tracker Heads
+    iPricingTrackerClmNmbr = GetColumNumbrOfRange(wbSourceWorkbook, "Control_PricingTrackerHeads")
+    If iPricingTrackerClmNmbr = 0 Then
+        GenerateErrorLog "Alert", "Pricing Tracker Heads Column not found "
+    End If
+    
+    'Finding Suggested SF
+    iSuggestedSFClmNmbr = GetColumNumbrOfRange(wbSourceWorkbook, "Control_SuggestedSF")
+    If iSuggestedSFClmNmbr = 0 Then
+        GenerateErrorLog "Alert", "Suggested SF Column not found "
+    End If
+            
+    If iItemIDClmNmbr <> iDefaultColumnValue And _
+        iItemNameClmNmbr <> iDefaultColumnValue And _
+        iComboNoClmNmbr <> iDefaultColumnValue And _
+        iManufacturerClmNmbr <> iDefaultColumnValue And _
+        iOfferPIDClmNmbr <> iDefaultColumnValue And _
+        iMultiplierClmNmbr <> iDefaultColumnValue And _
+        iCityClmNmbr <> iDefaultColumnValue And _
+        iStartDateClmNmbr <> iDefaultColumnValue And _
+        iEndDateClmNmbr <> iDefaultColumnValue And _
+        iTypeOfSupportClmNmbr <> iDefaultColumnValue And _
+        iTypeOfOfferClmNmbr <> iDefaultColumnValue And _
+        iValueOfSupportClmNmbr <> iDefaultColumnValue And _
+        iPricingTrackerClmNmbr <> iDefaultColumnValue And _
+        iCityValueClmNmbr <> iDefaultColumnValue And _
+        iSuggestedSFClmNmbr <> iDefaultColumnValue Then
+        
+        'Code to read data
+        Call GenerateRawData(wbSourceWorkbook)
+        
+    End If
+    
+    Application.StatusBar = False
+    
+    'Closing Source File
+    wbSourceWorkbook.Close False
+    
+    'Generating Data on Result Grid
+    Application.StatusBar = "Preparing BF Modification tab"
+    Call PrepareBFModificationTab(conn)
+    
+    Application.StatusBar = "Preparing Single SKU tab"
+    Call PrepareSingleSKUTab(conn)
+    
+    Application.StatusBar = "Preparing Single BMSM tab"
+    Call PrepareBMSMTab(conn)
+    
+    Application.StatusBar = "Preparing Single BXGY tab"
+    Call PrepareBXGYTab(conn)
+    
+    Application.StatusBar = "Preparing Single Combo2 tab"
+    Call PrepareCombo2Tab(conn)
+    
+    Application.StatusBar = "Preparing Single Combo3 tab"
+    Call PrepareCombo3Tab(conn)
+    
+    Application.StatusBar = "Preparing Single Combo5 tab"
+    Call PrepareCombo5Tab(conn)
+    
+    Application.StatusBar = "Preparing FOC tab"
+    Call PrepareFOCTab(conn)
+    
+    'Code to copy data on Sheet
+    Call PutResultErrorOnSheet(conn)
+    
+    conn.Close
+    
+    Application.StatusBar = False
+    Application.ScreenUpdating = True
+    
+    MsgBox "Data extracted in Result Tab.", vbOKOnly + vbInformation, "Pricing Tracker Tool"
+End Sub
+Private Sub PutResultErrorOnSheet(conn As ADODB.Connection)
+    Dim strSQL  As String
+    Dim rs As Recordset
+    
+    'Code to copy error on Excel Sheet
+    strSQL = "Select distinct RowNumber,ItemID,'Alert',ValidationErrorMessage "
+    strSQL = strSQL & " From RawData Where ValidationErrorMessage<>'' "
+    strSQL = strSQL & " Order by RowNumber "
+    Set rs = conn.Execute(strSQL)
+    
+    If rs.EOF = False Then
+        Dim lTotalRow As Long
+        lTotalRow = Range("Error_Sheet").Offset(100000).End(xlUp).Row
+        Range("Error_Sheet").Offset(lTotalRow, 1).CopyFromRecordset rs
+    End If
+    rs.Close
+    
+End Sub
+Private Sub PrepareBFModificationTab(conn As ADODB.Connection)
+    Dim rs As ADODB.Recordset
+    Dim strSQL As String
+    Dim rng As Range
+    
+    Dim strPrevId As String
+    Dim strPrevName As String
+    Dim strPrevTypeOfSupport As String
+    Dim strPrevValueOfSupport As String
+    Dim strPrevSuggestedSF As String
+    
+    Dim lPrevStartDate As Long
+    Dim lPrevEndDate As Long
+    
+    Dim lRowCounter As Long
+    Dim iCityColumn As Integer
+    
+    strSQL = " Select * FROM RawData "
+    strSQL = strSQL & " Where IsCritcalError <> 1 AND PricingTracker= 'BF Modification'"
+    strSQL = strSQL & " ORDER BY ItemID,StartDate,EndDate,TypeOfSupport,ValueOfSupport,SuggestedSF,RowNumber ASC;"
+    
+    Set rs = conn.Execute(strSQL)
+    Do While rs.EOF = False
+        If Not (strPrevId = rs.Fields("ItemID") _
+            And strPrevName = rs.Fields("ItemName") _
+            And strPrevTypeOfSupport = rs.Fields("TypeOfSupport") _
+            And strPrevValueOfSupport = rs.Fields("ValueOfSupport") _
+            And strPrevSuggestedSF = rs.Fields("SuggestedSF") _
+            And lPrevStartDate = rs.Fields("StartDate") _
+            And lPrevEndDate = rs.Fields("EndDate")) Then
+            
+            lRowCounter = lRowCounter + 1
+            
+            strPrevId = rs.Fields("ItemID")
+            strPrevName = rs.Fields("ItemName")
+            strPrevTypeOfSupport = rs.Fields("TypeOfSupport")
+            strPrevValueOfSupport = rs.Fields("ValueOfSupport")
+            strPrevSuggestedSF = rs.Fields("SuggestedSF")
+            lPrevStartDate = rs.Fields("StartDate")
+            lPrevEndDate = rs.Fields("EndDate")
+            
+            Range("BFModification_ItemID").Offset(lRowCounter).Value = strPrevId
+            Range("BFModification_Name").Offset(lRowCounter).Value = strPrevName
+            Range("BFModification_TypeOfOffer").Offset(lRowCounter).Value = UCase(GetOfferType(strPrevTypeOfSupport))
+            
+            Range("BFModification_StartDate").Offset(lRowCounter).Value = lPrevStartDate
+            Range("BFModification_StartDate").Offset(lRowCounter).NumberFormat = "mm/dd/yyyy"
+            
+            Range("BFModification_EndDate").Offset(lRowCounter).Value = lPrevEndDate
+            Range("BFModification_EndDate").Offset(lRowCounter).NumberFormat = "mm/dd/yyyy"
+            
+            Range("BFModification_SF").Offset(lRowCounter).Value = strPrevSuggestedSF
+            Range("BFModification_SF").Offset(lRowCounter).NumberFormat = rs.Fields("SuggestedSFNumberFormat")
+            
+            Range("BFModification_BF").Offset(lRowCounter).Value = strPrevValueOfSupport
+            Range("BFModification_BF").Offset(lRowCounter).NumberFormat = rs.Fields("ValueOfSupportNumberFormat")
+            
+'            If InStr(1, Range("BFModification_TypeOfOffer").Offset(lRowCounter).Value, "PERCENT") > 0 Then
+'                If IsNumeric(strPrevValueOfSupport) Then
+'
+'                    If CDbl(strPrevValueOfSupport) <= 1 Then
+'                        Range("BFModification_BF").Offset(lRowCounter).Value = CDbl(strPrevValueOfSupport) * 100
+'                    End If
+'                End If
+'                If IsNumeric(strPrevSuggestedSF) Then
+'                    If CDbl(strPrevSuggestedSF) <= 1 Then
+'                        Range("BFModification_SF").Offset(lRowCounter).Value = CDbl(strPrevSuggestedSF) * 100
+'                    End If
+'                End If
+'            End If
+        End If
+        iCityColumn = 0
+        For Each rng In Range(Range("BFModification_TypeOfOffer").Offset(0, 1), Range("BFModification_StartDate").Offset(0, -1))
+            iCityColumn = iCityColumn + 1
+                
+            If rng.Value = rs.Fields("City") Then
+                Exit For
+            End If
+        Next
+        If iCityColumn <> 0 Then
+            Range("BFModification_TypeOfOffer").Offset(lRowCounter, iCityColumn) = rs.Fields("CityValue")
+        End If
+        
+        rs.MoveNext
+    Loop
+    rs.Close
+    
+End Sub
+Private Sub PrepareSingleSKUTab(conn As ADODB.Connection)
+    Dim rs As ADODB.Recordset
+    Dim strSQL As String
+    Dim rng As Range
+    
+    Dim strPrevId As String
+    Dim strPrevName As String
+    Dim strPrevTypeOfOffer As String
+    
+    Dim strPrevValueOfSupport As String
+    Dim strPrevSuggestedSF As String
+    
+    Dim lPrevStartDate As Long
+    Dim lPrevEndDate As Long
+    
+    Dim lRowCounter As Long
+    Dim iCityColumn As Integer
+    
+    strSQL = " Select * FROM RawData "
+    strSQL = strSQL & " Where IsCritcalError <> 1 AND PricingTracker= 'Single SKU discounting'"
+    strSQL = strSQL & " ORDER BY ItemID,StartDate,EndDate,TypeOfOffer,ValueOfSupport,SuggestedSF,RowNumber ASC;"
+    
+    Set rs = conn.Execute(strSQL)
+    Do While rs.EOF = False
+        If Not (strPrevId = rs.Fields("ItemID") _
+            And strPrevName = rs.Fields("ItemName") _
+            And strPrevTypeOfOffer = rs.Fields("TypeOfOffer") _
+            And strPrevValueOfSupport = rs.Fields("ValueOfSupport") _
+            And strPrevSuggestedSF = rs.Fields("SuggestedSF") _
+            And lPrevStartDate = rs.Fields("StartDate") _
+            And lPrevEndDate = rs.Fields("EndDate")) Then
+            
+            lRowCounter = lRowCounter + 1
+            
+            strPrevId = rs.Fields("ItemID")
+            strPrevName = rs.Fields("ItemName")
+            strPrevTypeOfOffer = rs.Fields("TypeOfOffer")
+            strPrevValueOfSupport = rs.Fields("ValueOfSupport")
+            strPrevSuggestedSF = rs.Fields("SuggestedSF")
+            lPrevStartDate = rs.Fields("StartDate")
+            lPrevEndDate = rs.Fields("EndDate")
+            
+            Range("SingleSKU_ItemID").Offset(lRowCounter).Value = strPrevId
+            Range("SingleSKU_Name").Offset(lRowCounter).Value = strPrevName
+            Range("SingleSKU_TypeOfOffer").Offset(lRowCounter).Value = UCase(GetOfferType(strPrevTypeOfOffer))
+            
+            Range("SingleSKU_StartDate").Offset(lRowCounter).Value = lPrevStartDate
+            Range("SingleSKU_StartDate").Offset(lRowCounter).NumberFormat = "mm/dd/yyyy"
+            
+            Range("SingleSKU_EndDate").Offset(lRowCounter).Value = lPrevEndDate
+            Range("SingleSKU_EndDate").Offset(lRowCounter).NumberFormat = "mm/dd/yyyy"
+            
+            Range("SingleSKU_SF").Offset(lRowCounter).Value = strPrevSuggestedSF
+            Range("SingleSKU_SF").Offset(lRowCounter).NumberFormat = rs.Fields("SuggestedSFNumberFormat")
+            
+            Range("SingleSKU_BF").Offset(lRowCounter).Value = strPrevValueOfSupport
+            Range("SingleSKU_BF").Offset(lRowCounter).NumberFormat = rs.Fields("ValueOfSupportNumberFormat")
+            
+'            If InStr(1, Range("SingleSKU_TypeOfOffer").Offset(lRowCounter).Value, "PERCENT") > 0 Then
+'                If IsNumeric(strPrevValueOfSupport) Then
+'                    If CDbl(strPrevValueOfSupport) <= 1 Then
+'                        Range("SingleSKU_BF").Offset(lRowCounter).Value = CDbl(strPrevValueOfSupport) * 100
+'                    End If
+'                End If
+'                If IsNumeric(strPrevSuggestedSF) Then
+'                    If CDbl(strPrevSuggestedSF) <= 1 Then
+'                        Range("SingleSKU_SF").Offset(lRowCounter).Value = CDbl(strPrevSuggestedSF) * 100
+'                    End If
+'                End If
+'            End If
+            
+        End If
+        iCityColumn = 0
+        For Each rng In Range(Range("SingleSKU_TypeOfOffer").Offset(0, 1), Range("SingleSKU_StartDate").Offset(0, -1))
+            iCityColumn = iCityColumn + 1
+                
+            If rng.Value = rs.Fields("City") Then
+                Exit For
+            End If
+        Next
+        If iCityColumn <> 0 Then
+            Range("SingleSKU_TypeOfOffer").Offset(lRowCounter, iCityColumn) = rs.Fields("CityValue")
+        End If
+        
+        rs.MoveNext
+    Loop
+    rs.Close
+    
+End Sub
+Private Sub PrepareBXGYTab(conn As ADODB.Connection)
+    Dim rs As ADODB.Recordset
+    Dim strSQL As String
+    Dim rng As Range
+    
+    Dim strPrevId As String
+    Dim strPrevName As String
+    Dim strPrevTypeOfOffer As String
+    
+    Dim strPrevValueOfSupport As String
+    Dim strPrevSuggestedSF As String
+    
+    Dim lPrevStartDate As Long
+    Dim lPrevEndDate As Long
+    
+    Dim lRowCounter As Long
+    Dim iCityColumn As Integer
+    
+    strSQL = " Select * FROM RawData "
+    strSQL = strSQL & " Where IsCritcalError <> 1 AND PricingTracker= 'BXGY'"
+    strSQL = strSQL & " ORDER BY ItemID,StartDate,EndDate,TypeOfOffer,ValueOfSupport,SuggestedSF,RowNumber ASC;"
+    
+    Set rs = conn.Execute(strSQL)
+    Do While rs.EOF = False
+        If Not (strPrevId = rs.Fields("ItemID") _
+            And strPrevName = rs.Fields("ItemName") _
+            And strPrevTypeOfOffer = rs.Fields("TypeOfOffer") _
+            And strPrevValueOfSupport = rs.Fields("ValueOfSupport") _
+            And strPrevSuggestedSF = rs.Fields("SuggestedSF") _
+            And lPrevStartDate = rs.Fields("StartDate") _
+            And lPrevEndDate = rs.Fields("EndDate")) Then
+            
+            lRowCounter = lRowCounter + 1
+            
+            strPrevId = rs.Fields("ItemID")
+            strPrevName = rs.Fields("ItemName")
+            strPrevTypeOfOffer = rs.Fields("TypeOfOffer")
+            strPrevValueOfSupport = rs.Fields("ValueOfSupport")
+            strPrevSuggestedSF = rs.Fields("SuggestedSF")
+            lPrevStartDate = rs.Fields("StartDate")
+            lPrevEndDate = rs.Fields("EndDate")
+            
+            Range("BXGY_ItemID").Offset(lRowCounter).Value = strPrevId
+            
+            Range("BXGY_OfferPID").Offset(lRowCounter).Value = rs.Fields("OfferPID")
+            
+            Range("BXGY_Name").Offset(lRowCounter).Value = strPrevName
+            
+            Range("BXGY_TypeOfOffer").Offset(lRowCounter).Value = UCase(strPrevTypeOfOffer)
+            
+            If InStr(1, strPrevTypeOfOffer, "G") > 0 Then
+                Range("BXGY_PurchaseQty").Offset(lRowCounter).Value = Replace(Left(strPrevTypeOfOffer, InStr(1, strPrevTypeOfOffer, "G") - 1), "B", "")
+                Range("BXGY_FreeQty").Offset(lRowCounter).Value = Mid(strPrevTypeOfOffer, InStr(1, strPrevTypeOfOffer, "G") + 1)
+            End If
+            
+            Range("BXGY_StartDate").Offset(lRowCounter).Value = lPrevStartDate
+            Range("BXGY_StartDate").Offset(lRowCounter).NumberFormat = "mm/dd/yyyy"
+            
+            Range("BXGY_EndDate").Offset(lRowCounter).Value = lPrevEndDate
+            Range("BXGY_EndDate").Offset(lRowCounter).NumberFormat = "mm/dd/yyyy"
+            
+            Range("BXGY_SF").Offset(lRowCounter).Value = strPrevSuggestedSF
+            Range("BXGY_SF").Offset(lRowCounter).NumberFormat = rs.Fields("SuggestedSFNumberFormat")
+            
+            Range("BXGY_BF").Offset(lRowCounter).Value = strPrevValueOfSupport
+            Range("BXGY_BF").Offset(lRowCounter).NumberFormat = rs.Fields("ValueOfSupportNumberFormat")
+
+'            If IsNumeric(strPrevValueOfSupport) Then
+'                If CDbl(strPrevValueOfSupport) <= 1 Then
+'                    Range("BXGY_BF").Offset(lRowCounter).Value = CDbl(strPrevValueOfSupport) * 100
+'                End If
+'            End If
+'
+'            If IsNumeric(strPrevSuggestedSF) Then
+'                If CDbl(strPrevSuggestedSF) <= 1 Then
+'                    Range("BXGY_SF").Offset(lRowCounter).Value = CDbl(strPrevSuggestedSF) * 100
+'                End If
+'            End If
+                
+        End If
+        iCityColumn = 0
+        For Each rng In Range(Range("BXGY_FreeQty").Offset(0, 1), Range("BXGY_StartDate").Offset(0, -1))
+            iCityColumn = iCityColumn + 1
+                
+            If rng.Value = rs.Fields("City") Then
+                Exit For
+            End If
+        Next
+        If iCityColumn <> 0 Then
+            Range("BXGY_FreeQty").Offset(lRowCounter, iCityColumn) = rs.Fields("CityValue")
+        End If
+        
+        rs.MoveNext
+    Loop
+    rs.Close
+    
+End Sub
+Sub Test()
+
+End Sub
+
+Private Sub PrepareFOCTab(conn As ADODB.Connection)
+    Dim rs As ADODB.Recordset
+    Dim strSQL As String
+    Dim rng As Range
+    
+    Dim strPrevManufacturer As String
+    Dim strPrevComboNo As String
+    
+    Dim strPrevValueOfSupport As String
+    Dim strPrevSuggestedSF As String
+    
+    Dim strPrevTypeOfSupport As String
+    
+    Dim lPrevStartDate As Long
+    Dim lPrevEndDate As Long
+    
+    Dim lRowCounter As Long
+    Dim iCityColumn As Integer
+    
+    strSQL = " Select * FROM RawData "
+    strSQL = strSQL & " Where IsCritcalError <> 1 AND PricingTracker= 'FOC'"
+    strSQL = strSQL & " ORDER BY Manufacturer,ComboNo,StartDate,EndDate,RowNumber ASC;"
+    
+    Set rs = conn.Execute(strSQL)
+    Do While rs.EOF = False
+        If Not (strPrevManufacturer = rs.Fields("Manufacturer") _
+            And strPrevComboNo = rs.Fields("ComboNo") _
+            And lPrevStartDate = rs.Fields("StartDate") _
+            And lPrevEndDate = rs.Fields("EndDate")) Then
+            
+            lRowCounter = lRowCounter + 1
+            
+            strPrevManufacturer = rs.Fields("Manufacturer")
+            strPrevComboNo = rs.Fields("ComboNo")
+            strPrevTypeOfSupport = rs.Fields("TypeOfSupport")
+            lPrevStartDate = rs.Fields("StartDate")
+            lPrevEndDate = rs.Fields("EndDate")
+            strPrevValueOfSupport = rs.Fields("ValueOfSupport")
+            
+            Range("FOC_OfferPID").Offset(lRowCounter).Value = rs.Fields("OfferPID")
+            
+            Range("FOC_TypeOfOffer").Offset(lRowCounter).Value = UCase(GetOfferType(strPrevTypeOfSupport))
+            
+            Range("FOC_StartDate").Offset(lRowCounter).Value = lPrevStartDate
+            Range("FOC_StartDate").Offset(lRowCounter).NumberFormat = "mm/dd/yyyy"
+            
+            Range("FOC_EndDate").Offset(lRowCounter).Value = lPrevEndDate
+            Range("FOC_EndDate").Offset(lRowCounter).NumberFormat = "mm/dd/yyyy"
+            
+            Range("FOC_SF").Offset(lRowCounter).Value = rs.Fields("SuggestedSF")
+            Range("FOC_SF").Offset(lRowCounter).NumberFormat = rs.Fields("SuggestedSFNumberFormat")
+            
+            Range("FOC_BF").Offset(lRowCounter).Value = strPrevValueOfSupport
+            Range("FOC_BF").Offset(lRowCounter).NumberFormat = rs.Fields("ValueOfSupportNumberFormat")
+            
+'            If InStr(1, Range("FOC_TypeOfOffer").Offset(lRowCounter).Value, "PERCENT") > 0 Then
+'                If IsNumeric(strPrevValueOfSupport) Then
+'                    If CDbl(strPrevValueOfSupport) <= 1 Then
+'                        Range("FOC_BF").Offset(lRowCounter).Value = CDbl(strPrevValueOfSupport) * 100
+'                    End If
+'                End If
+'                If IsNumeric(rs.Fields("SuggestedSF")) Then
+'                    If CDbl(rs.Fields("SuggestedSF")) <= 1 Then
+'                        Range("FOC_SF").Offset(lRowCounter).Value = CDbl(rs.Fields("SuggestedSF")) * 100
+'                    End If
+'                End If
+'
+'            End If
+            
+        End If
+        If Range("FOC_ItemIDPurchase").Offset(lRowCounter).Value = "" Then
+            Range("FOC_ItemIDPurchase").Offset(lRowCounter).Value = rs.Fields("ItemID")
+            Range("FOC_Name").Offset(lRowCounter).Value = rs.Fields("ItemName")
+            Range("FOC_PurchaseMultiplier").Offset(lRowCounter).Value = rs.Fields("Multiplier")
+        
+        ElseIf Range("FOC_ItemIDFreebie").Offset(lRowCounter).Value = "" _
+                And Range("FOC_ItemIDPurchase").Offset(lRowCounter).Value <> rs.Fields("ItemID") Then
+            
+            Range("FOC_ItemIDFreebie").Offset(lRowCounter).Value = rs.Fields("ItemID")
+            
+            Range("FOC_Name").Offset(lRowCounter).Value = Range("FOC_Name").Offset(lRowCounter).Value & "_" & rs.Fields("ItemName")
+            
+            
+            Range("FOC_FreebieMultiplier").Offset(lRowCounter).Value = rs.Fields("Multiplier")
+        End If
+            
+        iCityColumn = 0
+        For Each rng In Range(Range("FOC_FreebieMultiplier").Offset(0, 1), Range("FOC_StartDate").Offset(0, -1))
+            iCityColumn = iCityColumn + 1
+                
+            If rng.Value = rs.Fields("City") Then
+                Exit For
+            End If
+        Next
+        If iCityColumn <> 0 Then
+            Range("FOC_FreebieMultiplier").Offset(lRowCounter, iCityColumn) = rs.Fields("CityValue")
+        End If
+        
+        rs.MoveNext
+    Loop
+    rs.Close
+    
+End Sub
+Private Sub PrepareCombo2Tab(conn As ADODB.Connection)
+    Dim rs As ADODB.Recordset
+    Dim strSQL As String
+    Dim rng As Range
+    
+    Dim strPrevManufacturer As String
+    Dim strPrevComboNo As String
+    
+    Dim strPrevValueOfSupport As String
+    Dim strPrevSuggestedSF As String
+    
+    Dim strPrevTypeOfSupport As String
+    
+    Dim lPrevStartDate As Long
+    Dim lPrevEndDate As Long
+    
+    Dim lRowCounter As Long
+    Dim iCityColumn As Integer
+    
+    strSQL = " Select * FROM RawData "
+    strSQL = strSQL & " Where IsCritcalError <> 1 AND PricingTracker= 'Combo 2'"
+    strSQL = strSQL & " ORDER BY Manufacturer,ComboNo,StartDate,EndDate,RowNumber ASC;"
+    
+    Set rs = conn.Execute(strSQL)
+    Do While rs.EOF = False
+        If Not (strPrevManufacturer = rs.Fields("Manufacturer") _
+            And strPrevComboNo = rs.Fields("ComboNo") _
+            And lPrevStartDate = rs.Fields("StartDate") _
+            And lPrevEndDate = rs.Fields("EndDate")) Then
+            
+            lRowCounter = lRowCounter + 1
+            
+            strPrevManufacturer = rs.Fields("Manufacturer")
+            strPrevComboNo = rs.Fields("ComboNo")
+            strPrevTypeOfSupport = rs.Fields("TypeOfSupport")
+            lPrevStartDate = rs.Fields("StartDate")
+            lPrevEndDate = rs.Fields("EndDate")
+            strPrevValueOfSupport = rs.Fields("ValueOfSupport")
+            
+            Range("Combo2_OfferPID").Offset(lRowCounter).Value = rs.Fields("OfferPID")
+            
+            Range("Combo2_TypeOfOffer").Offset(lRowCounter).Value = UCase(GetOfferType(strPrevTypeOfSupport))
+            
+            Range("Combo2_StartDate").Offset(lRowCounter).Value = lPrevStartDate
+            Range("Combo2_StartDate").Offset(lRowCounter).NumberFormat = "mm/dd/yyyy"
+            
+            Range("Combo2_EndDate").Offset(lRowCounter).Value = lPrevEndDate
+            Range("Combo2_EndDate").Offset(lRowCounter).NumberFormat = "mm/dd/yyyy"
+            
+            Range("Combo2_SF").Offset(lRowCounter).Value = rs.Fields("SuggestedSF")
+            Range("Combo2_SF").Offset(lRowCounter).NumberFormat = rs.Fields("SuggestedSFNumberFormat")
+            
+            Range("Combo2_BF").Offset(lRowCounter).Value = strPrevValueOfSupport
+            Range("Combo2_BF").Offset(lRowCounter).NumberFormat = rs.Fields("ValueOfSupportNumberFormat")
+            
+'            If InStr(1, Range("Combo2_TypeOfOffer").Offset(lRowCounter).Value, "PERCENT") > 0 Then
+'                If IsNumeric(strPrevValueOfSupport) Then
+'                    If CDbl(strPrevValueOfSupport) <= 1 Then
+'                        Range("Combo2_BF").Offset(lRowCounter).Value = CDbl(strPrevValueOfSupport) * 100
+'                    End If
+'                End If
+'
+'                If IsNumeric(rs.Fields("SuggestedSF")) Then
+'                    If CDbl(rs.Fields("SuggestedSF")) <= 1 Then
+'                        Range("Combo2_SF").Offset(lRowCounter).Value = CDbl(rs.Fields("SuggestedSF")) * 100
+'                    End If
+'                End If
+'            End If
+            
+        End If
+        Debug.Print rs.Fields("ItemID")
+        If Range("Combo2_ItemID1").Offset(lRowCounter).Value = "" Then
+            Range("Combo2_ItemID1").Offset(lRowCounter).Value = rs.Fields("ItemID")
+            Range("Combo2_Name").Offset(lRowCounter).Value = rs.Fields("ItemName")
+            Range("Combo2_ItemID1Multiplier").Offset(lRowCounter).Value = rs.Fields("Multiplier")
+        
+        ElseIf Range("Combo2_ItemID2").Offset(lRowCounter).Value = "" _
+                And Range("Combo2_ItemID1").Offset(lRowCounter).Value <> rs.Fields("ItemID") Then
+            
+            Range("Combo2_ItemID2").Offset(lRowCounter).Value = rs.Fields("ItemID")
+            
+            Range("Combo2_Name").Offset(lRowCounter).Value = Range("Combo2_Name").Offset(lRowCounter).Value & "_" & rs.Fields("ItemName")
+            
+            
+            Range("Combo2_ItemID2Multiplier").Offset(lRowCounter).Value = rs.Fields("Multiplier")
+        End If
+            
+        iCityColumn = 0
+        For Each rng In Range(Range("Combo2_ItemID2Multiplier").Offset(0, 1), Range("Combo2_StartDate").Offset(0, -1))
+            iCityColumn = iCityColumn + 1
+                
+            If rng.Value = rs.Fields("City") Then
+                Exit For
+            End If
+        Next
+        If iCityColumn <> 0 Then
+            Range("Combo2_ItemID2Multiplier").Offset(lRowCounter, iCityColumn) = rs.Fields("CityValue")
+        End If
+        
+        rs.MoveNext
+    Loop
+    rs.Close
+    
+End Sub
+
+Private Sub PrepareCombo3Tab(conn As ADODB.Connection)
+    Dim rs As ADODB.Recordset
+    Dim strSQL As String
+    Dim rng As Range
+    
+    Dim strPrevManufacturer As String
+    Dim strPrevComboNo As String
+    
+    Dim strPrevValueOfSupport As String
+    Dim strPrevSuggestedSF As String
+    
+    Dim strPrevTypeOfSupport As String
+    
+    Dim lPrevStartDate As Long
+    Dim lPrevEndDate As Long
+    
+    Dim lRowCounter As Long
+    Dim iCityColumn As Integer
+    
+    strSQL = " Select * FROM RawData "
+    strSQL = strSQL & " Where IsCritcalError <> 1 AND PricingTracker= 'Combo 3'"
+    strSQL = strSQL & " ORDER BY Manufacturer,ComboNo,StartDate,EndDate,RowNumber ASC;"
+    
+    Set rs = conn.Execute(strSQL)
+    Do While rs.EOF = False
+        If Not (strPrevManufacturer = rs.Fields("Manufacturer") _
+            And strPrevComboNo = rs.Fields("ComboNo") _
+            And lPrevStartDate = rs.Fields("StartDate") _
+            And lPrevEndDate = rs.Fields("EndDate")) Then
+            
+            lRowCounter = lRowCounter + 1
+            
+            strPrevManufacturer = rs.Fields("Manufacturer")
+            strPrevComboNo = rs.Fields("ComboNo")
+            strPrevTypeOfSupport = rs.Fields("TypeOfSupport")
+            lPrevStartDate = rs.Fields("StartDate")
+            lPrevEndDate = rs.Fields("EndDate")
+            strPrevValueOfSupport = rs.Fields("ValueOfSupport")
+            
+            Range("Combo3_OfferPID").Offset(lRowCounter).Value = rs.Fields("OfferPID")
+            
+            Range("Combo3_TypeOffer").Offset(lRowCounter).Value = UCase(GetOfferType(strPrevTypeOfSupport))
+            
+            Range("Combo3_StartDate").Offset(lRowCounter).Value = lPrevStartDate
+            Range("Combo3_StartDate").Offset(lRowCounter).NumberFormat = "mm/dd/yyyy"
+            
+            Range("Combo3_EndDate").Offset(lRowCounter).Value = lPrevEndDate
+            Range("Combo3_EndDate").Offset(lRowCounter).NumberFormat = "mm/dd/yyyy"
+            
+            Range("Combo3_SF").Offset(lRowCounter).Value = rs.Fields("SuggestedSF")
+            Range("Combo3_SF").Offset(lRowCounter).NumberFormat = rs.Fields("SuggestedSFNumberFormat")
+            
+            Range("Combo3_BF").Offset(lRowCounter).Value = strPrevValueOfSupport
+            Range("Combo3_BF").Offset(lRowCounter).NumberFormat = rs.Fields("ValueOfSupportNumberFormat")
+                    
+'            If InStr(1, Range("Combo3_TypeOffer").Offset(lRowCounter).Value, "PERCENT") > 0 Then
+'                If IsNumeric(strPrevValueOfSupport) Then
+'                    If CDbl(strPrevValueOfSupport) <= 1 Then
+'                        Range("Combo3_BF").Offset(lRowCounter).Value = CDbl(strPrevValueOfSupport) * 100
+'                    End If
+'                End If
+'                If IsNumeric(rs.Fields("SuggestedSF")) Then
+'                    If CDbl(rs.Fields("SuggestedSF")) <= 1 Then
+'                        Range("Combo3_SF").Offset(lRowCounter).Value = CDbl(rs.Fields("SuggestedSF")) * 100
+'                    End If
+'                End If
+'            End If
+            
+        End If
+        Debug.Print rs.Fields("ItemID")
+        If Range("Combo3_ItemID1").Offset(lRowCounter).Value = "" Then
+            Range("Combo3_ItemID1").Offset(lRowCounter).Value = rs.Fields("ItemID")
+            Range("Combo3_Name").Offset(lRowCounter).Value = rs.Fields("ItemName")
+            Range("Combo3_ItemID1Multiplier").Offset(lRowCounter).Value = rs.Fields("Multiplier")
+        
+        ElseIf Range("Combo3_ItemID2").Offset(lRowCounter).Value = "" _
+                And Range("Combo3_ItemID1").Offset(lRowCounter).Value <> rs.Fields("ItemID") Then
+            
+            Range("Combo3_ItemID2").Offset(lRowCounter).Value = rs.Fields("ItemID")
+            
+            Range("Combo3_Name").Offset(lRowCounter).Value = Range("Combo3_Name").Offset(lRowCounter).Value & "_" & rs.Fields("ItemName")
+            
+            
+            Range("Combo3_ItemID2Multiplier").Offset(lRowCounter).Value = rs.Fields("Multiplier")
+        ElseIf Range("Combo3_ItemID3").Offset(lRowCounter).Value = "" _
+                And Range("Combo3_ItemID1").Offset(lRowCounter).Value <> rs.Fields("ItemID") _
+                And Range("Combo3_ItemID2").Offset(lRowCounter).Value <> rs.Fields("ItemID") Then
+            
+            Range("Combo3_ItemID3").Offset(lRowCounter).Value = rs.Fields("ItemID")
+            
+            Range("Combo3_Name").Offset(lRowCounter).Value = Range("Combo3_Name").Offset(lRowCounter).Value & "_" & rs.Fields("ItemName")
+            
+            
+            Range("Combo3_ItemID3Multiplier").Offset(lRowCounter).Value = rs.Fields("Multiplier")
+        
+        End If
+            
+        iCityColumn = 0
+        For Each rng In Range(Range("Combo3_ItemID3Multiplier").Offset(0, 1), Range("Combo3_StartDate").Offset(0, -1))
+            iCityColumn = iCityColumn + 1
+                
+            If rng.Value = rs.Fields("City") Then
+                Exit For
+            End If
+        Next
+        If iCityColumn <> 0 Then
+            Range("Combo3_ItemID3Multiplier").Offset(lRowCounter, iCityColumn) = rs.Fields("CityValue")
+        End If
+        
+        rs.MoveNext
+    Loop
+    rs.Close
+    
+End Sub
+
+Private Sub PrepareCombo5Tab(conn As ADODB.Connection)
+    Dim rs As ADODB.Recordset
+    Dim strSQL As String
+    Dim rng As Range
+    
+    Dim strPrevManufacturer As String
+    Dim strPrevComboNo As String
+    
+    Dim strPrevValueOfSupport As String
+    Dim strPrevSuggestedSF As String
+    
+    Dim strPrevTypeOfSupport As String
+    
+    Dim lPrevStartDate As Long
+    Dim lPrevEndDate As Long
+    
+    Dim lRowCounter As Long
+    Dim iCityColumn As Integer
+    
+    strSQL = " Select * FROM RawData "
+    strSQL = strSQL & " Where IsCritcalError <> 1 AND PricingTracker= 'Combo 5'"
+    strSQL = strSQL & " ORDER BY Manufacturer,ComboNo,StartDate,EndDate,RowNumber ASC;"
+    
+    Set rs = conn.Execute(strSQL)
+    Do While rs.EOF = False
+        If Not (strPrevManufacturer = rs.Fields("Manufacturer") _
+            And strPrevComboNo = rs.Fields("ComboNo") _
+            And lPrevStartDate = rs.Fields("StartDate") _
+            And lPrevEndDate = rs.Fields("EndDate")) Then
+            
+            lRowCounter = lRowCounter + 1
+            
+            strPrevManufacturer = rs.Fields("Manufacturer")
+            strPrevComboNo = rs.Fields("ComboNo")
+            strPrevTypeOfSupport = rs.Fields("TypeOfSupport")
+            lPrevStartDate = rs.Fields("StartDate")
+            lPrevEndDate = rs.Fields("EndDate")
+            strPrevValueOfSupport = rs.Fields("ValueOfSupport")
+            
+            Range("Combo5_OfferPID").Offset(lRowCounter).Value = rs.Fields("OfferPID")
+            
+            Range("Combo5_TypeOfOffer").Offset(lRowCounter).Value = UCase(GetOfferType(strPrevTypeOfSupport))
+            
+            Range("Combo5_StartDate").Offset(lRowCounter).Value = lPrevStartDate
+            Range("Combo5_StartDate").Offset(lRowCounter).NumberFormat = "mm/dd/yyyy"
+            
+            Range("Combo5_EndDate").Offset(lRowCounter).Value = lPrevEndDate
+            Range("Combo5_EndDate").Offset(lRowCounter).NumberFormat = "mm/dd/yyyy"
+            
+            Range("Combo5_SF").Offset(lRowCounter).Value = rs.Fields("SuggestedSF")
+            Range("Combo5_SF").Offset(lRowCounter).NumberFormat = rs.Fields("SuggestedSFNumberFormat")
+            
+            Range("Combo5_BF").Offset(lRowCounter).Value = strPrevValueOfSupport
+            Range("Combo5_BF").Offset(lRowCounter).NumberFormat = rs.Fields("ValueOfSupportNumberFormat")
+            
+'            If InStr(1, Range("Combo5_TypeOfOffer").Offset(lRowCounter).Value, "PERCENT") > 0 Then
+'                If IsNumeric(strPrevValueOfSupport) Then
+'                    If CDbl(strPrevValueOfSupport) <= 1 Then
+'                        Range("Combo5_BF").Offset(lRowCounter).Value = CDbl(strPrevValueOfSupport) * 100
+'                    End If
+'                End If
+'
+'                If IsNumeric(rs.Fields("SuggestedSF")) Then
+'                    If CDbl(rs.Fields("SuggestedSF")) <= 1 Then
+'                        Range("Combo5_SF").Offset(lRowCounter).Value = CDbl(rs.Fields("SuggestedSF")) * 100
+'                    End If
+'                End If
+'
+'            End If
+            
+        End If
+        Debug.Print rs.Fields("ItemID")
+        If Range("Combo5_ItemID1").Offset(lRowCounter).Value = "" Then
+            Range("Combo5_ItemID1").Offset(lRowCounter).Value = rs.Fields("ItemID")
+            Range("Combo5_Name").Offset(lRowCounter).Value = rs.Fields("ItemName")
+            Range("Combo5_ItemID1Multiplier").Offset(lRowCounter).Value = rs.Fields("Multiplier")
+        
+        ElseIf Range("Combo5_ItemID2").Offset(lRowCounter).Value = "" _
+                And Range("Combo5_ItemID1").Offset(lRowCounter).Value <> rs.Fields("ItemID") Then
+            
+            Range("Combo5_ItemID2").Offset(lRowCounter).Value = rs.Fields("ItemID")
+            
+            Range("Combo5_Name").Offset(lRowCounter).Value = Range("Combo5_Name").Offset(lRowCounter).Value & "_" & rs.Fields("ItemName")
+            
+            
+            Range("Combo5_ItemID2Multiplier").Offset(lRowCounter).Value = rs.Fields("Multiplier")
+        
+        ElseIf Range("Combo5_ItemID3").Offset(lRowCounter).Value = "" _
+                And Range("Combo5_ItemID1").Offset(lRowCounter).Value <> rs.Fields("ItemID") _
+                And Range("Combo5_ItemID2").Offset(lRowCounter).Value <> rs.Fields("ItemID") Then
+            
+            Range("Combo5_ItemID3").Offset(lRowCounter).Value = rs.Fields("ItemID")
+            
+            Range("Combo5_Name").Offset(lRowCounter).Value = Range("Combo5_Name").Offset(lRowCounter).Value & "_" & rs.Fields("ItemName")
+            
+            
+            Range("Combo5_ItemID3Multiplier").Offset(lRowCounter).Value = rs.Fields("Multiplier")
+        ElseIf Range("Combo5_ItemID4").Offset(lRowCounter).Value = "" _
+                And Range("Combo5_ItemID1").Offset(lRowCounter).Value <> rs.Fields("ItemID") _
+                And Range("Combo5_ItemID2").Offset(lRowCounter).Value <> rs.Fields("ItemID") _
+                And Range("Combo5_ItemID3").Offset(lRowCounter).Value <> rs.Fields("ItemID") Then
+        
+            
+            Range("Combo5_ItemID4").Offset(lRowCounter).Value = rs.Fields("ItemID")
+            
+            Range("Combo5_Name").Offset(lRowCounter).Value = Range("Combo5_Name").Offset(lRowCounter).Value & "_" & rs.Fields("ItemName")
+            
+            
+            Range("Combo5_ItemID4Multiplier").Offset(lRowCounter).Value = rs.Fields("Multiplier")
+        ElseIf Range("Combo5_ItemID5").Offset(lRowCounter).Value = "" _
+                And Range("Combo5_ItemID1").Offset(lRowCounter).Value <> rs.Fields("ItemID") _
+                And Range("Combo5_ItemID2").Offset(lRowCounter).Value <> rs.Fields("ItemID") _
+                And Range("Combo5_ItemID3").Offset(lRowCounter).Value <> rs.Fields("ItemID") _
+                And Range("Combo5_ItemID4").Offset(lRowCounter).Value <> rs.Fields("ItemID") Then
+            
+            Range("Combo5_ItemID5").Offset(lRowCounter).Value = rs.Fields("ItemID")
+            
+            Range("Combo5_Name").Offset(lRowCounter).Value = Range("Combo5_Name").Offset(lRowCounter).Value & "_" & rs.Fields("ItemName")
+            
+            
+            Range("Combo5_ItemID5Multiplier").Offset(lRowCounter).Value = rs.Fields("Multiplier")
+        
+        End If
+            
+        iCityColumn = 0
+        For Each rng In Range(Range("Combo5_ItemID5Multiplier").Offset(0, 1), Range("Combo5_StartDate").Offset(0, -1))
+            iCityColumn = iCityColumn + 1
+                
+            If rng.Value = rs.Fields("City") Then
+                Exit For
+            End If
+        Next
+        If iCityColumn <> 0 Then
+            Range("Combo5_ItemID5Multiplier").Offset(lRowCounter, iCityColumn) = rs.Fields("CityValue")
+        End If
+        
+        rs.MoveNext
+    Loop
+    rs.Close
+    
+End Sub
+
+Private Sub PrepareBMSMTab(conn As ADODB.Connection)
+    Dim rs As ADODB.Recordset
+    Dim strSQL As String
+    Dim rng As Range
+    
+    Dim strPrevId As String
+    Dim strPrevName As String
+    Dim strPrevTypeOfSupport As String
+    Dim strPrevMultiplier As String
+    
+    Dim strPrevValueOfSupport As String
+    Dim strPrevSuggestedSF As String
+    
+    Dim lPrevStartDate As Long
+    Dim lPrevEndDate As Long
+    
+    Dim lRowCounter As Long
+    Dim iCityColumn As Integer
+    
+    strSQL = " Select * FROM RawData "
+    strSQL = strSQL & " Where IsCritcalError <> 1 AND PricingTracker= 'BMSM'"
+    strSQL = strSQL & " ORDER BY ItemID,StartDate,EndDate,Multiplier,TypeOfSupport,ValueOfSupport,SuggestedSF,RowNumber ASC;"
+    
+    Set rs = conn.Execute(strSQL)
+    Do While rs.EOF = False
+        If Not (strPrevId = rs.Fields("ItemID") _
+            And strPrevName = rs.Fields("ItemName") _
+            And strPrevMultiplier = rs.Fields("Multiplier") _
+            And strPrevTypeOfSupport = rs.Fields("TypeOfSupport") _
+            And strPrevValueOfSupport = rs.Fields("ValueOfSupport") _
+            And strPrevSuggestedSF = rs.Fields("SuggestedSF") _
+            And lPrevStartDate = rs.Fields("StartDate") _
+            And lPrevEndDate = rs.Fields("EndDate")) Then
+            
+            lRowCounter = lRowCounter + 1
+            
+            strPrevId = rs.Fields("ItemID")
+            strPrevName = rs.Fields("ItemName")
+            strPrevTypeOfSupport = rs.Fields("TypeOfSupport")
+            strPrevMultiplier = rs.Fields("Multiplier")
+            strPrevValueOfSupport = rs.Fields("ValueOfSupport")
+            strPrevSuggestedSF = rs.Fields("SuggestedSF")
+            lPrevStartDate = rs.Fields("StartDate")
+            lPrevEndDate = rs.Fields("EndDate")
+            
+            Range("BMSM_ItemID").Offset(lRowCounter).Value = strPrevId
+            
+            Range("BMSM_OfferPID").Offset(lRowCounter).Value = rs.Fields("OfferPID")
+            
+            
+            Range("BMSM_Name").Offset(lRowCounter).Value = strPrevName
+            Range("BMSM_Multiplier").Offset(lRowCounter).Value = strPrevMultiplier
+            
+            Range("BMSM_TypeOfOffer").Offset(lRowCounter).Value = UCase(GetOfferType(strPrevTypeOfSupport))
+            
+            Range("BMSM_StartDate").Offset(lRowCounter).Value = lPrevStartDate
+            Range("BMSM_StartDate").Offset(lRowCounter).NumberFormat = "mm/dd/yyyy"
+            
+            Range("BMSM_EndDate").Offset(lRowCounter).Value = lPrevEndDate
+            Range("BMSM_EndDate").Offset(lRowCounter).NumberFormat = "mm/dd/yyyy"
+            
+            Range("BMSM_SF").Offset(lRowCounter).Value = strPrevSuggestedSF
+            Range("BMSM_SF").Offset(lRowCounter).NumberFormat = rs.Fields("SuggestedSFNumberFormat")
+
+            Range("BMSM_BF").Offset(lRowCounter).Value = strPrevValueOfSupport
+            Range("BMSM_BF").Offset(lRowCounter).NumberFormat = rs.Fields("ValueOfSupportNumberFormat")
+
+'            If InStr(1, Range("BMSM_TypeOfOffer").Offset(lRowCounter).Value, "PERCENT") > 0 Then
+'                If IsNumeric(strPrevValueOfSupport) Then
+'                    If CDbl(strPrevValueOfSupport) <= 1 Then
+'                        Range("BMSM_BF").Offset(lRowCounter).Value = CDbl(strPrevValueOfSupport) * 100
+'                    End If
+'                End If
+'                If IsNumeric(strPrevSuggestedSF) Then
+'                    If CDbl(strPrevSuggestedSF) <= 1 Then
+'                        Range("BMSM_SF").Offset(lRowCounter).Value = CDbl(strPrevSuggestedSF) * 100
+'                    End If
+'                End If
+'            End If
+            
+        End If
+        iCityColumn = 0
+        For Each rng In Range(Range("BMSM_Multiplier").Offset(0, 1), Range("BMSM_StartDate").Offset(0, -1))
+            iCityColumn = iCityColumn + 1
+                
+            If rng.Value = rs.Fields("City") Then
+                Exit For
+            End If
+        Next
+        If iCityColumn <> 0 Then
+            Range("BMSM_Multiplier").Offset(lRowCounter, iCityColumn) = rs.Fields("CityValue")
+        End If
+        
+        rs.MoveNext
+    Loop
+    rs.Close
+    
+End Sub
+
+Private Function IsRupees(ByVal strValue As String) As Boolean
+    Dim strOldValue As String
+    
+    strValue = Application.WorksheetFunction.Trim(strValue)
+    
+    strOldValue = strValue
+    Dim dVal As Double
+    
+    strValue = Replace(LCase(strValue), "rs..", "")
+    strValue = Replace(LCase(strValue), "rs.", "")
+    strValue = Replace(LCase(strValue), "rs", "")
+    
+    strValue = Replace(LCase(strValue), "re..", "")
+    strValue = Replace(LCase(strValue), "re.", "")
+    strValue = Replace(LCase(strValue), "re", "")
+    
+    strValue = Replace(LCase(strValue), "r..", "")
+    strValue = Replace(LCase(strValue), "r.", "")
+    strValue = Replace(LCase(strValue), "r", "")
+    
+    IsRupees = Not (strOldValue = strValue)
+End Function
+Private Function CleanValue(ByVal strValue As String) As String
+    strValue = Application.WorksheetFunction.Trim(strValue)
+    Dim dVal As Double
+    
+    strValue = Replace(LCase(strValue), "rs..", "")
+    strValue = Replace(LCase(strValue), "rs.", "")
+    strValue = Replace(LCase(strValue), "rs", "")
+    
+    strValue = Replace(LCase(strValue), "re..", "")
+    strValue = Replace(LCase(strValue), "re.", "")
+    strValue = Replace(LCase(strValue), "re", "")
+    
+    strValue = Replace(LCase(strValue), "r..", "")
+    strValue = Replace(LCase(strValue), "r.", "")
+    strValue = Replace(LCase(strValue), "r", "")
+    
+    strValue = Replace(strValue, ":", "")
+    strValue = Replace(strValue, ";", "")
+    
+    CleanValue = strValue
+End Function
+Private Function GetOfferType(ByVal strOffertype As String)
+    If InStr(1, LCase(strOffertype), "percent") > 0 Then
+        GetOfferType = "percentage"
+    ElseIf InStr(1, LCase(strOffertype), "price off") > 0 Then
+        GetOfferType = "absolute"
+    ElseIf InStr(1, LCase(strOffertype), "price") > 0 Or _
+            InStr(1, LCase(strOffertype), "flat") > 0 Or _
+            InStr(1, LCase(strOffertype), "flat price") > 0 Or _
+            InStr(1, LCase(strOffertype), "flat prices") > 0 Then
+        GetOfferType = "flat"
+    ElseIf InStr(1, LCase(strOffertype), "absolute") > 0 Then
+        GetOfferType = "absolute"
+    Else
+        GetOfferType = ""
+    End If
+    
+End Function
+
+Private Sub GenerateRawData(wbSourceWorkbook As Workbook)
+    Dim lSourceRow As Long
+    Dim lSourceTotalRow As Long
+    Dim bRowLevelError As Boolean
+    Dim strSQL  As String
+    Dim strTabName As String
+    
+    strTabName = wbSourceWorkbook.Worksheets(1).Name
+    
+    With wbSourceWorkbook.Worksheets(strTabName)
+        lSourceTotalRow = .Range("A100000").End(xlUp).Row
+        For lSourceRow = 2 To lSourceTotalRow
+            bRowLevelError = False
+            
+            'Checking if Backgrouund color is Red
+            If .Cells(lSourceRow, iItemIDClmNmbr).Interior.Color = vbRed Then
+                bRowLevelError = True
+                GenerateErrorLog "Alert", "Ignoring row as background color is Red", strTabName, lSourceRow
+            Else
+                
+                'Checking if ID is missing
+                If .Cells(lSourceRow, iItemIDClmNmbr).Value = "" Then
+                    bRowLevelError = True
+                    GenerateErrorLog "Alert", "ItemID value is missing", strTabName, lSourceRow
+                End If
+                
+                'Checking if Manufacturer is missing
+                If .Cells(lSourceRow, iManufacturerClmNmbr).Value = "" Then
+                    bRowLevelError = True
+                    GenerateErrorLog "Alert", "Manufacturer value is missing", strTabName, lSourceRow
+                End If
+                
+                'Checking if Start Date is missing
+                .Cells(lSourceRow, iStartDateClmNmbr).NumberFormat = 0
+                If .Cells(lSourceRow, iStartDateClmNmbr).Value = "" Then
+                    bRowLevelError = True
+                    GenerateErrorLog "Alert", "Start Date value is missing", strTabName, lSourceRow
+                ElseIf Not IsNumeric(.Cells(lSourceRow, iStartDateClmNmbr).Value) Then
+                    bRowLevelError = True
+                    GenerateErrorLog "Alert", "Start Date value is invalid", strTabName, lSourceRow
+                End If
+                
+                'Validating End Date
+                .Cells(lSourceRow, iEndDateClmNmbr).NumberFormat = 0
+                If .Cells(lSourceRow, iEndDateClmNmbr).Value = "" Then
+                    bRowLevelError = True
+                    GenerateErrorLog "Alert", "End Date value is missing", strTabName, lSourceRow
+                ElseIf Not IsNumeric(.Cells(lSourceRow, iEndDateClmNmbr).Value) Then
+                    bRowLevelError = True
+                    GenerateErrorLog "Alert", "End Date value is invalid", strTabName, lSourceRow
+                ElseIf .Cells(lSourceRow, iEndDateClmNmbr).Value < .Cells(lSourceRow, iStartDateClmNmbr).Value Then
+                    GenerateErrorLog "Alert", "End Date is prior to Start Date", strTabName, lSourceRow
+                    bRowLevelError = True
+                End If
+                
+            End If
+            'Code to read data if there is no issue at row level
+            If Not bRowLevelError Then
+                Call PutDataInRawTab(wbSourceWorkbook, strTabName, lSourceRow)
+            End If
+        Next
+    End With
+    
+End Sub
+Private Sub PutDataInRawTab(wbSourceWorkbook As Workbook, strTabName As String, lSourceRow As Long)
+    Dim strSQLRawDataRawData  As String
+    Dim rs As ADODB.Recordset
+    
+    Dim strValidationErrorMessage As String
+    Dim iIsCritical As Integer
+    
+    With wbSourceWorkbook.Worksheets(strTabName)
+    
+        strSQLRawDataRawData = " Insert into RawData(RowNumber,ItemID,ItemName," & vbNewLine
+        strSQLRawDataRawData = strSQLRawDataRawData & " ComboNo,Manufacturer,OfferPID," & vbNewLine
+        strSQLRawDataRawData = strSQLRawDataRawData & " Multiplier,City,StartDate,EndDate,CityValue," & vbNewLine
+        strSQLRawDataRawData = strSQLRawDataRawData & " TypeOfSupport,TypeOfOffer,ValueOfSupport,ValueOfSupportNumberFormat," & vbNewLine
+        strSQLRawDataRawData = strSQLRawDataRawData & " PricingTracker,SuggestedSF,SuggestedSFNumberFormat,ValidationErrorMessage," & vbNewLine
+        strSQLRawDataRawData = strSQLRawDataRawData & " IsCritcalError) Values " & vbNewLine
+        
+        'Row Number
+        strSQLRawDataRawData = strSQLRawDataRawData & "(" & lSourceRow & "," & vbNewLine
+        
+        'Item ID
+        strSQLRawDataRawData = strSQLRawDataRawData & "'" & .Cells(lSourceRow, iItemIDClmNmbr).Value & "'," & vbNewLine
+        
+        'Item Name
+        strSQLRawDataRawData = strSQLRawDataRawData & "'" & .Cells(lSourceRow, iItemNameClmNmbr).Value & "'," & vbNewLine
+        
+        'Combo No
+        strSQLRawDataRawData = strSQLRawDataRawData & "'" & .Cells(lSourceRow, iComboNoClmNmbr).Value & "'," & vbNewLine
+        
+        'Manufacturer
+        strSQLRawDataRawData = strSQLRawDataRawData & "'" & .Cells(lSourceRow, iManufacturerClmNmbr).Value & "'," & vbNewLine
+        
+        'Offer PID
+        strSQLRawDataRawData = strSQLRawDataRawData & "'" & .Cells(lSourceRow, iOfferPIDClmNmbr).Value & "'," & vbNewLine
+        
+        'Multiplier
+        strSQLRawDataRawData = strSQLRawDataRawData & "'" & .Cells(lSourceRow, iMultiplierClmNmbr).Value & "'," & vbNewLine
+        
+        'City
+        strSQLRawDataRawData = strSQLRawDataRawData & "'" & .Cells(lSourceRow, iCityClmNmbr).Value & "'," & vbNewLine
+        
+        'Start Date
+        strSQLRawDataRawData = strSQLRawDataRawData & "'" & Format(.Cells(lSourceRow, iStartDateClmNmbr), "yyyy-mm-dd") & "'," & vbNewLine
+        
+        'End Date
+        strSQLRawDataRawData = strSQLRawDataRawData & "'" & Format(.Cells(lSourceRow, iEndDateClmNmbr), "yyyy-mm-dd") & "'," & vbNewLine
+        
+        'City Value
+        strSQLRawDataRawData = strSQLRawDataRawData & "'" & .Cells(lSourceRow, iCityValueClmNmbr).Value & "'," & vbNewLine
+        
+        'type of support
+        strSQLRawDataRawData = strSQLRawDataRawData & "'" & .Cells(lSourceRow, iTypeOfSupportClmNmbr).Value & "'," & vbNewLine
+        
+        'Type of Offer
+        strSQLRawDataRawData = strSQLRawDataRawData & "'" & .Cells(lSourceRow, iTypeOfOfferClmNmbr).Value & "'," & vbNewLine
+        
+        'Value of Support
+        strSQLRawDataRawData = strSQLRawDataRawData & "'" & .Cells(lSourceRow, iValueOfSupportClmNmbr).Value & "'," & vbNewLine
+        
+        'Value of Support Number Format
+        strSQLRawDataRawData = strSQLRawDataRawData & "'" & .Cells(lSourceRow, iValueOfSupportClmNmbr).NumberFormat & "'," & vbNewLine
+        
+        'Pricing Tracker
+        strSQLRawDataRawData = strSQLRawDataRawData & "'" & .Cells(lSourceRow, iPricingTrackerClmNmbr).Value & "'," & vbNewLine
+        
+        'Suggested SF
+        strSQLRawDataRawData = strSQLRawDataRawData & "'" & .Cells(lSourceRow, iSuggestedSFClmNmbr).Value & "'," & vbNewLine
+        
+        'Suggested SF Number Format
+        strSQLRawDataRawData = strSQLRawDataRawData & "'" & .Cells(lSourceRow, iSuggestedSFClmNmbr).NumberFormat & "'," & vbNewLine
+        
+        'Validation Error Message
+        strSQLRawDataRawData = strSQLRawDataRawData & "'" & strValidationErrorMessage & "', "
+        
+        'Validation Is Critical
+        strSQLRawDataRawData = strSQLRawDataRawData & iIsCritical & ") "
+        
+        conn.Execute strSQLRawDataRawData
+        
+    End With
+    
+End Sub
+Private Function GetColumNumbrOfRange(wbSourceWorkbook As Workbook, strRangeName As String) As Integer
+    Dim iClm As Integer
+    Dim iCounter As Integer
+    Dim iClmCounter As Integer
+    Dim iTotalColumn As Integer
+    
+    iCounter = 1
+    With wbSourceWorkbook.Worksheets(1)
+        Do While Range(strRangeName).Offset(iCounter).Value <> ""
+            On Error Resume Next
+            iClm = 0
+            iClm = Application.WorksheetFunction _
+                    .Match(Range(strRangeName).Offset(iCounter).Value, .Range("1:1"), 0)
+            
+            On Error GoTo 0
+            If iClm <> 0 Then
+                Exit Do
+            End If
+            iCounter = iCounter + 1
+        Loop
+    End With
+    If iClm = 0 Then
+        iClm = iDefaultColumnValue
+    End If
+    GetColumNumbrOfRange = iClm
+End Function
+Private Sub GenerateErrorLog(strErrorType As String, strErrorDescription As String, Optional strSheetName As String, Optional lSourceRowNmbr As Long)
+    Dim lLastRow As Long
+    lLastRow = Range("Error_Sheet").Offset(100000).End(xlUp).Row - Range("Error_Sheet").Row + 1
+    
+    Range("Error_Sheet").Offset(lLastRow).Value = strSheetName
+    Range("Error_RowNumber").Offset(lLastRow).Value = IIf(lSourceRowNmbr = 0, "", lSourceRowNmbr)
+    
+    Range("Error_ErrorType").Offset(lLastRow).Value = strErrorType
+    Range("Error_ErrorDescription").Offset(lLastRow).Value = strErrorDescription
+    
+End Sub
+Private Function GetSourceFileName() As String
+    
+    Dim fDialog As FileDialog
+    
+    Set fDialog = Application.FileDialog(msoFileDialogFilePicker)
+        
+    'Optional: FileDialog properties
+    fDialog.AllowMultiSelect = False
+    fDialog.Title = "Select a Pricing Tracker "
+    'Optional: Add filters
+    fDialog.Filters.Clear
+    fDialog.Filters.Add "Excel files", "*.xlsx"
+    fDialog.Filters.Add "All files", "*.*"
+     
+    'Show the dialog. -1 means success!
+    If fDialog.Show = -1 Then
+        GetSourceFileName = fDialog.SelectedItems(1)
+        Exit Function
+    End If
+    GetSourceFileName = ""
+End Function
