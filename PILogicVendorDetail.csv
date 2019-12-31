@@ -1,0 +1,10 @@
+Item ID, Product Name, Facility ID,Facility Name, Vendor Facility Identifier, Load Size, Load Type, PO Days, case_sensitivity_type, PO Cycle, Vendor Name, Manufacturer Name, Manufacturer ID, Vendor ID, TAT Days, TAT Type, Vendor Alignment Active, PO Cycle Type
+10000002,Priya Mango Avakaya without Garlic Pickle,3,Super Store Bangalore - Warehouse,Soukya Road,15000,VALUE,"Monday,Thursday",2,3,PRASHANTH TRADERS - BLR,Ushodaya Enterprises Pvt. Ltd.,62,1071,2,Uploaded,1,Biweekly
+10000002,Priya Mango Avakaya without Garlic Pickle,14,Super Store Hyderabad - Warehouse,Patancheru,10000,VALUE,Monday,2,7,R M Traders,Ushodaya Enterprises Pvt. Ltd.,62,11730,7,Uploaded,1,Weekly
+10000002,Priya Mango Avakaya without Garlic Pickle,32,Super Store Bangalore B2 - Warehouse,Opposite Soukya Church,15000,VALUE,"Monday,Thursday",2,3,PRASHANTH TRADERS - BLR,Ushodaya Enterprises Pvt. Ltd.,62,1071,2,Uploaded,1,Biweekly
+10000002,Priya Mango Avakaya without Garlic Pickle,43,Super Store Hyderabad H2 - Warehouse,Kompally,10000,VALUE,Monday,2,7,R M Traders,Ushodaya Enterprises Pvt. Ltd.,62,11730,7,Uploaded,1,Weekly
+10000002,Priya Mango Avakaya without Garlic Pickle,44,Feeder Warehouse - Hyderabad,Kompally Bulk,Not Assigned,Not Assigned,,,,R M Traders,Ushodaya Enterprises Pvt. Ltd.,62,11730,,,1,
+10000004,Nivea Extra Moisture Shaving Gel,64,Super Store Faridabad_2 - Warehouse,12/1 Milestone,50000,VALUE,Monday,,7,NIVEA INDIA PVT. LTD. - GURGAON,Nivea India Pvt. Ltd.,45,1154,5,Default,1,Weekly
+10000005,Nivea Men Oil Control 10x Whitening Face Wash,1,Super Store Ahmedabad - Warehouse,Changodar,25000,VALUE,"Tuesday,Friday",0,3,SHARP MARKETING-AHM,Nivea India Pvt. Ltd.,45,1112,4,Uploaded,1,Biweekly
+10000005,Nivea Men Oil Control 10x Whitening Face Wash,3,Super Store Bangalore - Warehouse,Soukya Road,35000,VALUE,Monday,2,7,NIVEA INDIA PVT LTD - BLR,Nivea India Pvt. Ltd.,45,1062,5,Uploaded,1,Weekly
+10000005,Nivea Men Oil Control 10x Whitening Face Wash,12,Super Store Gurgaon G1 - Warehouse,"G1,Killa No 50",50000,VALUE,Thursday,1,7,NIVEA INDIA PVT. LTD. - GURGAON,Nivea India Pvt. Ltd.,45,1154,7,Uploaded,1,Weekly
